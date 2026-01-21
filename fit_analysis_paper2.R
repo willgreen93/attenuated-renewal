@@ -14,7 +14,7 @@ model_levels <- c("lrwP", "R_random5", "R_biased5", "expdelayP", "incdelayP", "p
 place_levels <- c("BCN", "LON", "MAD", "NYC", "SF", "HOMO", "HET", "SIM")
 
 id_cols <- c("model", "cutoff", "epi_phase", "place", "sr")
-full_names <- c(lrwP="LRW", R_random5="RRW", R_biased="RBR", expdelay="EXP-T", incdelayP="EXP-AR", powdelay="P-AR", sigmoidP="SIG-T", sigmoidPS="SIG-T2")
+full_names <- c(lrwP="LRW", R_random5="RRAND", R_biased5="RBIAS", expdelay="EXPT", incdelayP="EXPI", powdelay="POWI", sigmoidP="SIGT")
 
 skeleton_plot_sim      <- readRDS("fits/outputs/skeleton_plot_sim_all2.rds")      #%>% mutate(place=as.character(scenario), sr="SIM", epi_phase=as.numeric(as.character(epi_phase))) %>% select(day, true_value, cutoff, model, epi_phase, total_infection, lower, median, upper, cutoff2, place, sr) 
 skeleton_last_week_sim <- readRDS("fits/outputs/skeleton_last_week_sim_all2.rds") #%>% mutate(place=as.character(scenario), sr="SIM", epi_phase=as.numeric(as.character(epi_phase))) %>% select(sample, model, cutoff, epi_phase, total_infection, prediction, true_value, place, sr) 
@@ -55,8 +55,191 @@ scoring_results_agg <- scoring_results_raw0 %>%
   group_by(model, grouping, measure, metric) %>%
   summarise(value=mean(value)) 
 
-scoring_results_agg %>% filter(metric=="crps")                      %>% mutate(value=round(value, ifelse(measure=="Linear CRPS", 0, 2))) %>% tidyr::spread(grouping, value) %>% select(!metric) %>% arrange(measure, model) 
-#scoring_results_agg %>% filter(metric=="crps", measure=="Log CRPS") %>% mutate(value=round(value, ifelse(measure=="lin", 1, 2))) %>% tidyr::spread(grouping, value) %>% select(!metric) %>% arrange(measure, model) %>% select(model, measure, LON, BCN, MAD, NYC, SF, HOMO, HET, SIM) %>% mutate(model=full_names[model])
+scoring_results_agg %>% filter(metric=="crps") %>% mutate(value=round(value, ifelse(measure=="Linear CRPS", 0, 2))) %>% tidyr::spread(grouping, value) %>% select(!metric) %>% arrange(measure, model) 
+
+R_case <- function(simul_vec){
+  for(k in simul_vec){
+    print(k)
+    b <- readRDS(paste0("fits/sim/fit_sim3/fit_sigmoidP_k=1_strat=annual_likelihood=1_epi_phase=7_",k,".rds"))
+    c <- rstan::extract(b$fit)
+    
+    gT_dist <- b$input_list$gen_weights[b$input_list$gen_weights!=0]
+    tmax <- length(gT_dist)
+    
+    mean_R_df <- b$simulation$generation_interval_matrix %>%
+      group_by(person, t_I_start) %>%
+      left_join(b$simulation$generation_interval_matrix %>% group_by(infector) %>% summarise(onward_infections=n()), by = c("person" = "infector")) %>%
+      select(t_I_start, person, onward_infections) %>%
+      mutate(onward_infections = ifelse(is.na(onward_infections), 0, onward_infections)) %>%
+      group_by(t_I_start) %>%
+      summarise(mean_R=mean(onward_infections)) %>%
+      mutate(rollmean_R = zoo::rollmean(mean_R, 7, fill=NA)) %>%
+      filter(t_I_start < b$input_list$N+b$input_list$h-tmax)
+    
+    ggplot(mean_R_df, aes(x=t_I_start, y=rollmean_R)) +
+      geom_point() +
+      theme_minimal()
+    
+    j_vec <- c(0,seq_len(b$input_list$N+b$input_list$h))  # for example
+    
+    R_mat <- sapply(j_vec, function(jk) c$R_floor + (c$R0 - c$R_floor) * plogis(-c$delta * (jk-as.vector(c$t_change))))
+    #R_vec <- R_mat[1,]
+    
+    imm_mat <- (1-cbind(0,c$cumulative_infections[,,1]/b$param_list$num_nodes))
+    #imm_vec <- imm_mat[1,]
+    
+    
+    #R_case <- vector(length=length(R_vec))
+    #for(i in 1:length(R_case)) R_case[i] <- sum(R_vec[i:(i+tmax-1)]*gT_dist*imm_vec[i:(i+tmax-1)])
+    
+    R_case_mat <- matrix(nrow=nrow(R_mat), ncol=ncol(R_mat)-tmax)
+    for(i in 1:nrow(R_case_mat)){
+      R_vec <- R_mat[i,]
+      imm_vec <- imm_mat[i,]
+      for(j in 1:ncol(R_case_mat)) R_case_mat[i,j] <- sum(R_vec[j:(j+tmax-1)]*gT_dist*imm_vec[j:(j+tmax-1)])
+    }
+    
+    col_ci <- apply(R_case_mat, 2, quantile, probs = c(0.025, 0.5, 0.975))[,mean_R_df$t_I_start+1]
+    
+    if(k==simul_vec[1]) R_plotting <- mean_R_df %>% mutate(R_lower=col_ci[1,], R_median=col_ci[2,], R_upper=col_ci[3,]) %>% mutate(simulation=k)
+    else R_plotting <- rbind(R_plotting, mean_R_df %>% mutate(R_lower=col_ci[1,], R_median=col_ci[2,], R_upper=col_ci[3,]) %>% mutate(simulation=k))
+    
+  }
+  
+  p <- ggplot(R_plotting, aes(x=t_I_start)) +
+    geom_line(aes(y=R_median)) +
+    geom_ribbon(aes(ymin=R_lower, ymax=R_upper), alpha=0.2) +
+    geom_point(aes(y=rollmean_R)) +
+    theme_minimal() +
+    facet_wrap(~simulation, scales="free") +
+    theme(panel.grid = element_blank()) +
+    labs(x="Time (days)", y=("Reproduction Number"))
+  
+  print(p)
+  
+  return(p)
+}
+
+fig <- R_case(simul_vec=seq(11,19,1))
+ggsave("figures/R_case_comp.png", fig, width=9, height=9)
+
+ts_comb <- ggplot(scoring_results_raw %>% filter(metric != "crps", grouping %in% c("SIM")) %>% mutate(epi_phase=as.numeric(as.character(epi_phase)))) +
+  geom_bar(aes(x = epi_phase, y = value, fill = metric),
+           position = "stack",
+           stat = "identity") +
+  facet_grid(measure ~ model2, switch = "x", scale="free_y") +
+  theme_minimal() + 
+  theme(strip.placement = "outside",
+        strip.background = element_rect(fill = NA, color = "white"),
+        panel.spacing = unit(-.01,"cm"),
+        panel.grid=element_blank(), 
+        legend.position="none") +
+  scale_x_continuous(breaks = scales::pretty_breaks()) +
+  labs(x="", title="CRPS measured on the linear forecasting scale")
+
+ggsave("figures/ts_comb.png", ts_comb, width=12, height=7.5)
+
+cit_epi_phase <- ggplot(scoring_results_raw %>% filter(measure=="Linear CRPS", metric != "crps", sr %in% c("CIT")) %>% mutate(epi_phase=as.numeric(as.character(epi_phase)))) +
+  geom_bar(aes(x = epi_phase, y = value, fill = metric),
+           position = "stack",
+           stat = "identity", color=NA) +
+  facet_grid(grouping~model2, switch = "x", scales="free_y") +
+  theme_minimal() + 
+  theme(strip.placement = "outside",
+        strip.background = element_rect(fill = NA, color = "white"),
+        panel.spacing = unit(-.01,"cm"),
+        panel.grid=element_blank(),
+        legend.position="none") +
+  scale_x_continuous(breaks = scales::pretty_breaks()) +
+  labs(x="", title="CRPS measured on the linear forecasting scale")
+
+cit_epi_phase
+
+ggsave("figures/crps_epi_phase_cit.png", cit_epi_phase, width=10, height=10)
+
+comparison_func_real <- function(skeleton_plot, model_list, epi_phase_list, place_list, cutoff_graph=F, sr_list="SIM"){
+  if(cutoff_graph==T) skeleton_plot <- skeleton_plot %>% filter(cutoff<=day+10)
+  
+  skeleton_plot_fil <- skeleton_plot %>% filter(model %in% model_list, epi_phase %in% epi_phase_list, place %in% place_list, sr %in% sr_list) %>%
+    mutate(model2=factor(full_names[model], levels=full_names))
+  
+  p1 <- ggplot(skeleton_plot_fil %>% filter(true_value>0 | day > cutoff), aes(x=day, fill=factor(epi_phase))) +
+    geom_point(aes(y=true_value)) +
+    geom_ribbon(aes(ymin=lower, ymax=upper), alpha=0.2) +
+    geom_line(aes(y=median)) +
+    geom_vline(aes(xintercept=cutoff), linetype="dashed") +
+    theme_minimal() +
+    theme(strip.placement = "outside",
+          strip.background = element_rect(fill = NA, color = "white"),
+          panel.spacing = unit(-.01,"cm"),
+          panel.grid=element_blank(),
+          legend.position="none") +
+    #scale_y_log10() +
+    facet_grid(model~place, scales="free") +
+    theme(panel.grid=element_blank()) 
+  
+  p2 <- ggplot(skeleton_plot_fil %>% filter(true_value>=1, median>=1 | day > cutoff, day > 20), aes(x=day, fill=factor(epi_phase))) +
+    geom_point(aes(y=true_value), size=0.5) +
+    geom_ribbon(aes(ymin=lower, ymax=upper), alpha=0.2) +
+    geom_line(aes(y=median)) +
+    geom_vline(aes(xintercept=cutoff), linetype="dashed") +
+    theme_minimal() + 
+    #scale_fill_brewer(palette = "Set3") +
+    scale_fill_manual(values = c(
+      "#007BFF",  # bright blue
+      "#9B00FF",  # bright purple
+      "#FF1493"   # bright pink
+    )) +
+    theme(strip.placement = "outside",
+          strip.background = element_rect(fill = NA, color = NA),
+          panel.spacing = unit(0.2,"cm"),
+          panel.grid=element_blank(),
+          legend.position="none",
+          axis.line = element_line(),
+          axis.ticks = element_line()) +
+    scale_y_log10() +
+    facet_grid(model2~place, scales="free") +
+    theme(panel.grid=element_blank()) +
+    labs(x="Day", y="Incidence") 
+  
+  p2
+  #q <- scoring_results_real_raw %>% filter(model %in% model_list) 
+  
+  print(ggpubr::ggarrange(p1, p2, nrow=1))
+  print(p1)
+  print(p2)
+  return(list(p1, p2))
+}
+
+place_comp <- comparison_func_real(skeleton_plot, model_list=c("lrwP", "R_biased5", "R_random5", "sigmoidP"), epi_phase_list=c(2, 6, 10), place_list=c("BCN", "SF", "MAD", "NYC"), cutoff_graph=F, sr_list="CIT")
+
+ggsave("figures/place_comp.png", place_comp[[2]], width=15, height=9)
+
+g <- rbind(scoring_lin, scoring_log) %>% filter(sr=="CIT") %>% group_by(epi_phase, place, measure) %>% 
+  mutate(rank=rank(crps)) %>% group_by(model, measure) %>% 
+  summarise(av_rank=mean(rank), low_rank = quantile(rank, 0.25), high_rank=quantile(rank, 0.75)) %>%
+  rename(score_type=measure) %>% arrange(av_rank)
+
+offset <- 0.1
+
+cit_lol <- ggplot(g, aes(color = score_type)) +
+  geom_errorbarh(aes(xmin = low_rank, xmax = high_rank,
+                     y = as.numeric(reorder(model, av_rank)) + ifelse(score_type == "Linear CRPS", -offset, +offset)),
+                 height = 0.15, alpha  = 0.6, linewidth = 1) +
+  geom_point(aes(x = av_rank, y = as.numeric(reorder(model, av_rank)) +
+                   ifelse(score_type == "Linear CRPS", -offset, +offset)), size = 3) +
+  scale_y_continuous(breaks = 1:length( levels(reorder(g$model, g$av_rank))), labels =  levels(reorder(g$model, g$av_rank))) +
+  theme_bw() +
+  theme(panel.grid = element_blank()) +
+  labs(x = "Average rank across cities and epidemic phases", y = "Model")
+
+cit_lol
+
+ggsave("figures/prop_win_cit.png", cit_lol, width=5, height=5)
+
+
+
+
 
 
 
@@ -189,10 +372,10 @@ offset <- 0.1
 
 cit_lol <- ggplot(g, aes(color = score_type)) +
   geom_errorbarh(aes(xmin = low_rank, xmax = high_rank,
-      y = as.numeric(reorder(model, av_rank)) + ifelse(score_type == "Linear CRPS", -offset, +offset)),
-    height = 0.15, alpha  = 0.6, linewidth = 1) +
+                     y = as.numeric(reorder(model, av_rank)) + ifelse(score_type == "Linear CRPS", -offset, +offset)),
+                 height = 0.15, alpha  = 0.6, linewidth = 1) +
   geom_point(aes(x = av_rank, y = as.numeric(reorder(model, av_rank)) +
-        ifelse(score_type == "Linear CRPS", -offset, +offset)), size = 3) +
+                   ifelse(score_type == "Linear CRPS", -offset, +offset)), size = 3) +
   scale_y_continuous(breaks = 1:length( levels(reorder(g$model, g$av_rank))), labels =  levels(reorder(g$model, g$av_rank))) +
   theme_bw() +
   theme(panel.grid = element_blank()) +
@@ -376,3 +559,42 @@ R_case <- function(p){
 }
 
 for(i in 10:20) R_case(i)
+
+R_inst <- function(p){
+  b <- readRDS(paste0("fits/sim/fit_sim3/fit_sigmoidP_k=1_strat=annual_likelihood=1_epi_phase=10_",p,".rds"))
+  c <- rstan::extract(b$fit)
+  
+  mean_R_df <- b$simulation$generation_interval_matrix %>%
+    group_by(person, t_I_start) %>%
+    left_join(b$simulation$generation_interval_matrix %>% group_by(infector) %>% summarise(onward_infections=n()), by = c("person" = "infector")) %>%
+    select(t_I_start, person, onward_infections) %>%
+    mutate(onward_infections = ifelse(is.na(onward_infections), 0, onward_infections)) %>%
+    group_by(t_I_start) %>%
+    summarise(mean_R=mean(onward_infections)) %>%
+    mutate(rollmean_R = zoo::rollmean(mean_R, 7, fill=NA)) %>%
+    filter(t_I_start < b$input_list$N+b$input_list$h)
+  
+  ggplot(mean_R_df, aes(x=t_I_start, y=rollmean_R)) +
+    geom_point() +
+    theme_minimal()
+  
+  j_vec <- c(0,seq_len(b$input_list$N+b$input_list$h))  # for example
+  
+  R_mat <- sapply(j_vec, function(jk) c$R_floor + (c$R0 - c$R_floor) * plogis(-c$delta * (jk-as.vector(c$t_change))))
+  
+  imm_mat <- (1-cbind(0,c$cumulative_infections[,,1]/b$param_list$num_nodes))
+  
+  col_ci <- apply(R_mat*imm_mat, 2, quantile, probs = c(0.025, 0.5, 0.975))[,mean_R_df$t_I_start+1]
+  
+  R_plotting <- mean_R_df %>% mutate(R_lower=col_ci[1,], R_median=col_ci[2,], R_upper=col_ci[3,])
+  
+  p <- ggplot(R_plotting, aes(x=t_I_start)) +
+    geom_line(aes(y=R_median)) +
+    geom_ribbon(aes(ymin=R_lower, ymax=R_upper), alpha=0.2) +
+    geom_point(aes(y=rollmean_R)) +
+    theme_minimal()
+  
+  print(p)
+}
+
+for(i in 10:20) R_inst(i)

@@ -5,22 +5,19 @@ R_hat_list <- list()
 model_name_list <- list()
 divergences_list <- list()
 
-j=1
+df <- data.frame(file_name=character(), Rhat=numeric(), divergences=numeric())
+j <- 1
 
-for(i in c(list.files("fits/sim/fit_sim2", full.names = TRUE, pattern="R_random5"))){#list.files("fits/cities", full.names = TRUE), ,list.files("fits/sim/fit_hetero", full.names = TRUE),list.files("fits/sim/fit_homo", full.names = TRUE))){
-  print(i, quote=F)
+for(i in files_list$file_name){#c(list.files("fits/sim/fit_sim3", full.names = TRUE), list.files("fits/sim/fit_homo", full.names = TRUE), list.files("fits/sim/fit_het", full.names = TRUE), list.files("fits/cities", full.names = TRUE))){
   
   file <- readRDS(i)
   
   divs <- sapply(rstan::get_sampler_params(file$fit, inc_warmup = FALSE), function(x) sum(x[, "divergent__"]))
   if(sum(divs)>0) print(divs)
   
-  file_list[[j]] <- i
-  divergences_list[[j]] <- sum(divs)
-  R_hat_list[[j]] <- max(summary(file$fit)$summary[,"Rhat"])
-  model_name_list[[j]] <- file$model_name
-  if(R_hat_list[[j]] > 1.05) print(c(R_hat_list[[j]], file_list[[j]]), quote=F)
-
+  df[j,] <- c(i, file$max_Rhat, file$total_divergences) 
+  print(df[j,], quote=F)
+  
   j <- j+1
 } 
 
@@ -64,10 +61,17 @@ df %>%
   summarise(n=n(), n_div_gt0 = sum(divergences > 50,  na.rm = TRUE), .groups = "drop") %>%
   mutate(pct=n_div_gt0/n) 
 
-files_list <- df %>% filter(!models %in% c("R_biased3", "R_random3", "sigmoid", "rw")) %>% arrange(desc(divergences))
+files_list <- df2[df2$divergences >= 1,]
 
-for(j in 3:nrow(files_list)){
-  a <- readRDS(files_list$files[j])
+for(j in 1:nrow(files_list)){
+  filename <- files_list$file_name[j]
+  print(filename)
+  a <- readRDS(filename)
+  
+  if (grepl("cities", filename)) dir <- ""  # No need to extract anything
+  else dir <- sub(".*sim/([^/]+)/.*", "\\1", filename)
+  print(dir)
+  
   simulation <- a$simulation
   if(length(simulation) < 10) simulation <- a$tag
   model_name <- a$model_name
@@ -75,19 +79,18 @@ for(j in 3:nrow(files_list)){
   epi_phase <- a$input_list$epi_phase
   
   cum_inc <- cumsum(a$input_list$incidence_strat)
-  #cum_inc <- cumsum(simulation$incidence$incidence)
-  
+
   tot_inc <- max(cum_inc)
   lower <- which(cum_inc > tot_inc * 0.05)[1]
   upper <- which(cum_inc > tot_inc * 0.95)[1]-28
   times <- round(seq(lower, upper, length.out=10))
   
   tag <- a$tag
-  new_model_name <- paste0(model_name,"P")
+  #new_model_name <- paste0(model_name,"P")
   
   print(c("Divergences before = ", files_list$divergences[j]), quote=F)
   
-  a12 <- fit_func(simulation, model_name=new_model_name, range_limits=c(0), strat="annual", cutoff=cutoff, tag=tag, keep_fit=TRUE, epi_phase=epi_phase, decay_type=NA, dir="", iter=1000, chains=4, adapt_delta=0.8)
+  a12 <- fit_func(simulation, model_name=model_name, range_limits=c(0), strat="annual", cutoff=cutoff, tag=tag, keep_fit=TRUE, epi_phase=epi_phase, decay_type=NA, dir=dir, iter=1000, chains=4, adapt_delta=0.8)
   print(sapply(rstan::get_sampler_params(a12$fit, inc_warmup = FALSE), function(x) sum(x[, "divergent__"])))
   cat("\n")
   

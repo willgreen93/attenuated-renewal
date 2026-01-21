@@ -39,8 +39,8 @@ ranges_generator <- function(simulation, range_limits, strat){
   
   if(length(ranges)>1){
     names(ranges) <- c(
-    paste0(range_limits[-length(range_limits)], "-", range_limits[-1] - 1),
-    paste0(range_limits[length(range_limits)], "+")
+      paste0(range_limits[-length(range_limits)], "-", range_limits[-1] - 1),
+      paste0(range_limits[length(range_limits)], "+")
     )
   }
   
@@ -71,7 +71,7 @@ incidence_strat_generator <- function(simulation, range_limits, strat){
       summarise(count=n()) %>%
       filter(!is.na(infected_by)) %>%
       tidyr::spread(infected_by, count)  
-      
+    
     incidence_strat <- left_join(days, incidence_strat_raw, by="t_E_start") %>% select(-t_E_start) %>%
       replace_na(list(main = 0, ot = 0))
   }
@@ -98,7 +98,7 @@ incidence_strat_generator <- function(simulation, range_limits, strat){
   return(list(incidence_strat=summed_df,
               n_people=n_people, 
               n=length(ranges)))#,
-              #average_edges=average_edges))
+  #average_edges=average_edges))
 }
 
 lrwP <- stan_model("functions/log_random_walkP.stan")
@@ -150,6 +150,8 @@ pop <- c(BCN=1.73e6,  #https://portaldades.ajuntament.barcelona.cat/en/statistic
 
 prop_MSM <- 0.038
 
+MSM_pop <- pop*prop_MSM
+
 MSM_pop["LON"] <- 0.038*pop["LON"]*0.5*0.5        # Inequalities in Sexual Health. Update on HIV and STIs in men who have sex with men in London 
 MSM_pop["NYC"] <- round(397399*0.5)               # Estimating Population Sizes of Men Who Have Sex with Men in the United States # chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://depts.washington.edu/hivtcg/presentations/uploads/35/estimating_population_sizes_of_men_who_have_sex_with_men_in_the_united_states.pdf?utm_source=chatgpt.com
 MSM_pop["SF"] <- round(145972*0.5)                # Estimating Population Sizes of Men Who Have Sex with Men in the United States # chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://depts.washington.edu/hivtcg/presentations/uploads/35/estimating_population_sizes_of_men_who_have_sex_with_men_in_the_united_states.pdf?utm_source=chatgpt.com
@@ -195,7 +197,7 @@ fit_func <- function(simulation, model_name, range_limits, strat, cutoff, tag, k
   print(paste0("Model name = ", model_name, "     Epi phase = ", epi_phase, "     Tag = ", tag), quote=F)
   
   p <- proc.time()
-  fit <- sampling(model, input_list, iter=iter, chains=chains, cores=4, seed=(3), init=init, control = list(adapt_delta = adapt_delta)) 
+  fit <- sampling(model, input_list, iter=iter, chains=chains, cores=4, seed=(4), init=init, control = list(adapt_delta = adapt_delta)) 
   
   max_Rhat <- max(summary(fit)$summary[,"Rhat"])
   divergences <- sapply(rstan::get_sampler_params(fit, inc_warmup = FALSE), function(x) sum(x[, "divergent__"]))
@@ -204,13 +206,26 @@ fit_func <- function(simulation, model_name, range_limits, strat, cutoff, tag, k
   print(paste0("Rhat = ", round(max_Rhat, 2), " Divergences = ", total_divergences), quote=F)
   
   if(max_Rhat>1.05) iter <- iter*2
-   
   if(total_divergences > 1) adapt_delta = 0.99
-
-  if(max_Rhat>1.05 | total_divergences > 1){
+  
+  if(max_Rhat>1.05 | total_divergences >= 1){
     print(paste0("Rerunning with iter = ", iter, " and adapt_delta = ", adapt_delta), quote=F)
-    fit <- sampling(model, input_list, iter=iter, chains=chains, cores=4, seed=(3), init=init, control = list(adapt_delta = adapt_delta)) 
+    fit <- sampling(model, input_list, iter=iter, chains=chains, cores=4, seed=(5), init=init, control = list(adapt_delta = adapt_delta)) 
+    max_Rhat <- max(summary(fit)$summary[,"Rhat"])
+    divergences <- sapply(rstan::get_sampler_params(fit, inc_warmup = FALSE), function(x) sum(x[, "divergent__"]))
+    total_divergences <- sum(divergences)
   } 
+  
+  if(max_Rhat>1.05) iter <- iter*2
+  if(total_divergences > 1) adapt_delta = 0.99
+  
+  if(max_Rhat>1.05 | total_divergences >= 1){
+    print(paste0("Rerunning with iter = ", iter, " and adapt_delta = ", adapt_delta), quote=F)
+    fit <- sampling(model, input_list, iter=iter, chains=chains, cores=4, seed=(6), init=init, control = list(adapt_delta = adapt_delta))
+    max_Rhat <- max(summary(fit)$summary[,"Rhat"])
+    divergences <- sapply(rstan::get_sampler_params(fit, inc_warmup = FALSE), function(x) sum(x[, "divergent__"]))
+    total_divergences <- sum(divergences)
+  }
   
   max_Rhat <- max(summary(fit)$summary[,"Rhat"])
   divergences <- sapply(rstan::get_sampler_params(fit, inc_warmup = FALSE), function(x) sum(x[, "divergent__"]))
@@ -260,7 +275,7 @@ model_name_list <- list()
 divergences_list <- list()
 time_taken <- list()
 
-for(j in c(list.files("simulation/sim_2/"))[29:100]){
+for(j in c(list.files("simulation/sim_2/"))[42:100]){
   simulation <- readRDS(paste0("simulation/sim_2/",j))$outbreak
   
   cum_inc <- cumsum(simulation$incidence$incidence)
@@ -442,7 +457,7 @@ for(i in sorted_files[1:8]){
            epi_phase=fit_output$input_list$epi_phase[1],
            strata=paste0(fit_output$strat,"_",fit_output$input_list$k)) %>% 
     mutate(place=fit_output$tag)
-    
+  
   inf_plot <- inf_samples %>% dplyr::select(-sample) %>% 
     dplyr::group_by(day, true_value, place, cutoff, model, epi_phase, total_infection) %>%
     summarise(lower=quantile(prediction, probs=0.025),
@@ -582,7 +597,7 @@ cvfit <- cv.glmnet(X, y, alpha = 1)
 fit_coefs <- coef(cvfit, s = "lambda.min") 
 
 
-  
+
 ggplot(scoring_results, aes(y=crps, x=model)) +
   geom_col(position=position_dodge()) +
   facet_grid(paste0("epi_phase=",epi_phase)~scenario, scales="free_y") +
@@ -725,7 +740,7 @@ ggplot(scoring_results_agg2, aes(y=crps, x=model, fill=strata)) +
 
 a <- readRDS("fits/fit_sat_k=5_strat=recurrent_likelihood=2_cutoff=75.rds")
 
-  
+
 
 
 plotting_func(readRDS("fits/fit_sat_k=4_strat=recurrent_likelihood=2_cutoff=100_ass.rds"))
@@ -814,26 +829,26 @@ rstan::expose_stan_functions(model_strat)
 rstan::expose_stan_functions(model_strat_strat)
 
 C <- SIR_model_strat_R(a = c(1, 2, 4), 
-                           beta =   0.05,
-                           gamma =  15, 
-                           S0 =     c(20000, 5000, 5000), 
-                           E0 =     c(0,0,0), 
-                           I0 =     c(2,2,2), 
-                           R0 =     c(0,0,0), 
-                           m =      350, 
-                           k =      3, 
-                           delta =  0.5) 
+                       beta =   0.05,
+                       gamma =  15, 
+                       S0 =     c(20000, 5000, 5000), 
+                       E0 =     c(0,0,0), 
+                       I0 =     c(2,2,2), 
+                       R0 =     c(0,0,0), 
+                       m =      350, 
+                       k =      3, 
+                       delta =  0.5) 
 
 D <- SIR_model_strat(a = c(1, 2, 4), 
-                           beta =   0.05,
-                           gamma =  15, 
-                           S0 =     c(20000, 5000, 5000), 
-                           E0 =     c(0,0,0), 
-                           I0 =     c(2,2,2), 
-                           R0 =     c(0,0,0), 
-                           m =      350, 
-                           k =      3, 
-                           delta =  0.5) 
+                     beta =   0.05,
+                     gamma =  15, 
+                     S0 =     c(20000, 5000, 5000), 
+                     E0 =     c(0,0,0), 
+                     I0 =     c(2,2,2), 
+                     R0 =     c(0,0,0), 
+                     m =      350, 
+                     k =      3, 
+                     delta =  0.5) 
 
 #####
 B <- SIR_model_strat_strat(a = c(1, 2, 4), 
@@ -851,20 +866,20 @@ plot(rowSums(simplify2array(B)[,5,]))
 
 
 input_n1  <- list(N=350, 
-                 incidence=round(simplify2array(B)[,5,],0), 
-                 h=28, 
-                 S0=colSums(simplify2array(B)[1,1:4,]),  
-                 R0=rep(0,3),  
-                 k=3, 
-                 gamma=45)
+                  incidence=round(simplify2array(B)[,5,],0), 
+                  h=28, 
+                  S0=colSums(simplify2array(B)[1,1:4,]),  
+                  R0=rep(0,3),  
+                  k=3, 
+                  gamma=45)
 
 input_n2  <- list(N=350, 
-                 incidence=round(rowSums(simplify2array(B)[,5,],0)), 
-                 h=28, 
-                 S0=colSums(simplify2array(B)[1,1:4,]),  
-                 R0=rep(0,3),  
-                 k=3, 
-                 gamma=45)
+                  incidence=round(rowSums(simplify2array(B)[,5,],0)), 
+                  h=28, 
+                  S0=colSums(simplify2array(B)[1,1:4,]),  
+                  R0=rep(0,3),  
+                  k=3, 
+                  gamma=45)
 
 fit_strat_n1 <- sampling(model_strat_strat, input_n1, iter=1000, chain=1, cores=4, control=list(adapt_delta=0.95), init=list(list(beta=c(0.1), phi=0.1)))
 fit_strat_n2 <- sampling(model_strat,       input_n2, iter=1000, chain=1, cores=4, control=list(adapt_delta=0.95), init=list(list(beta=c(0.1), phi=0.1)))
@@ -968,17 +983,6 @@ A <- SIR_model_strat(a =     summary(fit_strat_strat5_annual$fit_strat_n, pars="
 
 
 C <- SIR_model_strat_strat(a = c(1, 2, 4), 
-                       beta =   0.105,
-                       gamma =  15, 
-                       S0 =     c(20000, 5000, 1000), 
-                       E0 =     c(0,0,0), 
-                       I0 =     c(1,0,1), 
-                       R0 =     c(0,0,0), 
-                       m =      350, 
-                       k =      3, 
-                       delta =  0.5) 
-
-D <- SIR_model_strat(a = c(1, 2, 4), 
                            beta =   0.105,
                            gamma =  15, 
                            S0 =     c(20000, 5000, 1000), 
@@ -988,6 +992,17 @@ D <- SIR_model_strat(a = c(1, 2, 4),
                            m =      350, 
                            k =      3, 
                            delta =  0.5) 
+
+D <- SIR_model_strat(a = c(1, 2, 4), 
+                     beta =   0.105,
+                     gamma =  15, 
+                     S0 =     c(20000, 5000, 1000), 
+                     E0 =     c(0,0,0), 
+                     I0 =     c(1,0,1), 
+                     R0 =     c(0,0,0), 
+                     m =      350, 
+                     k =      3, 
+                     delta =  0.5) 
 
 #A[[1]][1:3,]
 B[90:100,,1]
@@ -1007,7 +1022,7 @@ model_output <- reshape2::melt(B, varnames = c("Time", "Compartment", "Stratum")
 ggplot(model_output %>% filter(Compartment=="Incidence") %>% mutate(Stratum=factor(Stratum)), aes(x=Time, color=Stratum)) +
   geom_line(aes(y=Value)) +
   theme_bw() #+
-  #facet_wrap(~Stratum, scales="free_y")
+#facet_wrap(~Stratum, scales="free_y")
 
 incidence_input <- fit_strat_strat5_annual$input_list_strat_n$incidence %>% magrittr::set_colnames(1:dim(B)[3]) %>% as.data.frame() %>%
   mutate(Time=row_number()) %>%     # Add a Time column
@@ -1171,7 +1186,7 @@ comparison_function <- function(input_lists, N, h){
   
   models     <-  list(rw=model_rw,       sm=model_sm,       model_comp=model_comp, model_strat2=model_strat, model_strat5=model_strat, model_strat_main=model_strat, model_strat_strat2=model_strat_strat, model_strat_strat5=model_strat_strat, model_strat_strat_main=model_strat_strat)
   input_lists <- list(input_list_origin, input_list_origin, input_list_comp,       input_list2,              input_list5,              input_list_main,              input_list_strat2,                    input_list_strat5,                    input_list_strat_main)
-
+  
   #for(k in 1:5){
   for(j in c(150)){
     for(i in 7){#1:length(models)){
@@ -1179,7 +1194,7 @@ comparison_function <- function(input_lists, N, h){
       
       model <- models[[i]]
       input_list <- input_lists[[i]]
-
+      
       input_list$N <- j
       
       if(i<7){
@@ -1229,9 +1244,9 @@ output_list <- readRDS("fits/output_combined.rds")
 
 output_plot <- output_list$output %>% filter(x < stop+26) %>% mutate(stop=factor(stop))  %>%
   mutate(type=factor(type, levels=c("rw", "lrw", "sm", "model_comp", "model_strat2", "model_strat5", "model_strat_main", "model_strat_strat2", "model_strat_strat5", "model_strat_strat_main"))) 
-  #group_by(stop, seed, type, x) %>%
-  #summarise(lower=mean(lower), median=mean(median), upper=mean(upper), incidence=mean(incidence)) 
-  
+#group_by(stop, seed, type, x) %>%
+#summarise(lower=mean(lower), median=mean(median), upper=mean(upper), incidence=mean(incidence)) 
+
 fits <- ggplot(output_plot %>% filter(), aes(x=x, fill=type)) +
   geom_line(aes(y=median, color=type)) +
   geom_ribbon(aes(ymin=lower, ymax=upper), alpha=0.5) +
@@ -1240,7 +1255,7 @@ fits <- ggplot(output_plot %>% filter(), aes(x=x, fill=type)) +
   facet_grid(stop ~ type, scales="free") +
   geom_vline(aes(xintercept = as.numeric(as.character(stop))), linetype="dashed") +
   theme(panel.grid=element_blank()) #+
-  #lims(y=c(0,200))
+#lims(y=c(0,200))
 
 fits
 ggsave("figures/fits.png", fits)
@@ -1260,10 +1275,10 @@ fits2
 ggsave("figures/fits2.png", fits2, width=10, height=3)
 
 samples <- output_list$samples
-  
+
 sc_scores <- score(samples)
 sc_summary <- summarise_scores(sc_scores, by=c("cutoff","model")) %>% arrange(cutoff) #%>%
-  #mutate(model=factor(model, levels=c("rw", "lrw", "sm", "comp", "homo", "homo_dd", "ass", "ass_dd", "ass_strat", "ass_strat_dd")))
+#mutate(model=factor(model, levels=c("rw", "lrw", "sm", "comp", "homo", "homo_dd", "ass", "ass_dd", "ass_strat", "ass_strat_dd")))
 sc_summary
 
 fits3 <- ggplot(sc_summary, aes(x = cutoff, y = crps, fill = model)) +
@@ -1273,7 +1288,7 @@ fits3 <- ggplot(sc_summary, aes(x = cutoff, y = crps, fill = model)) +
   theme(panel.grid=element_blank()) +
   scale_y_log10() +
   theme()#legend.position="none")
-  
+
 fits3
 ggsave("figures/fits3.png", fits3, width=10, height=3)
 

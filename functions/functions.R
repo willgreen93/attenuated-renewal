@@ -7,7 +7,7 @@ library(profvis)
 library(igraph)
 library(truncnorm)
 
-setwd("~/NetworkPaper3")
+setwd("~/attenuated-renewal")
 
 word_to_num <- c("one" = 1, "two" = 2, "three" = 3, "four" = 4)
 
