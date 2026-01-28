@@ -63,8 +63,8 @@ df %>%
 
 files_list <- df2[df2$divergences >= 1,]
 
-for(j in 1:nrow(files_list)){
-  filename <- files_list$file_name[j]
+for(j in seq_along(files_rerun2)){
+  filename <- files_rerun2[j]
   print(filename)
   a <- readRDS(filename)
   
@@ -88,9 +88,10 @@ for(j in 1:nrow(files_list)){
   tag <- a$tag
   #new_model_name <- paste0(model_name,"P")
   
-  print(c("Divergences before = ", files_list$divergences[j]), quote=F)
+  print(c("Divergences before = ", sapply(rstan::get_sampler_params(a$fit, inc_warmup = FALSE), function(x) sum(x[, "divergent__"]))), quote=F)
+  print(c("Rhat before = ", summary(a$fit)$summary[,"Rhat"] %>% max()), quote=F)
   
-  a12 <- fit_func(simulation, model_name=model_name, range_limits=c(0), strat="annual", cutoff=cutoff, tag=tag, keep_fit=TRUE, epi_phase=epi_phase, decay_type=NA, dir=dir, iter=1000, chains=4, adapt_delta=0.8)
+  a12 <- fit_func(simulation, model_name=model_name, range_limits=c(0), strat="annual", cutoff=cutoff, tag=tag, keep_fit=TRUE, epi_phase=epi_phase, decay_type=NA, dir=dir, iter=2000, chains=4, adapt_delta=0.95)
   print(sapply(rstan::get_sampler_params(a12$fit, inc_warmup = FALSE), function(x) sum(x[, "divergent__"])))
   cat("\n")
   

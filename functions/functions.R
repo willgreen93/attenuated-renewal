@@ -13,7 +13,7 @@ word_to_num <- c("one" = 1, "two" = 2, "three" = 3, "four" = 4)
 
 main_ot_partners_generator2 <- function(type="hetero", num_nodes=1000, dd_upper=100, dd_param=-1.81, main_partners_prop=c(zero = 0.3, one = 0.45, two = 0.125, three = 0.098, four = 0.027), monogamy=0) {
   if(type %in% c("hetero", "sim")) desired_degrees <- sample(1:dd_upper, num_nodes, replace = TRUE, prob = (1:dd_upper)^dd_param)
-  if(type=="homo") desired_degrees <- unname(rep(dd_upper, length(desired_degrees)))
+  if(type=="homo") desired_degrees <- unname(rep(dd_upper, num_nodes))
   
   if (monogamy != 0) {
     one_partner_indices <- which(desired_degrees == 1)
@@ -660,20 +660,62 @@ graph_gen_outbreak_sim2 <- function(type="hetero", num_nodes=1000, riv=c(1/3, 1/
   
 }
 
-for(i in 1:nrow(lhs)){
-  g <- assortative_graph_generator3(type="hetero", 
-                               num_nodes=lhs$num_nodes[i]/10, 
-                               riv=c(lhs$riv1[i], lhs$riv2[i], lhs$riv3[i]), 
-                               assortativity_kernel=lhs$assortativity_kernel[i], 
-                               spatial_kernel=lhs$spatial_kernel[i], 
-                               main_partners_prop=c(zero = lhs$p0[i], one = lhs$p1[i], two = lhs$p2[i], three = lhs$p3[i], four = lhs$p4[i]), 
-                               ass_v_param = lhs$ass_v_param[i],
-                               dd_param = round(lhs$dd_param[i],2),
-                               dd_upper = lhs$dd_upper[i],
-                               matrix_tag = 1,
-                               seed_add=1, role=T, monogamy=0, cm=3, ot_max=365)
-}
+i <- 1
+g <- assortative_graph_generator3(type="hetero", num_nodes=100, riv=c(lhs$riv1[i], lhs$riv2[i], lhs$riv3[i]), 
+                                 assortativity_kernel=lhs$assortativity_kernel[i], spatial_kernel=lhs$spatial_kernel[i], 
+                                 main_partners_prop=c(zero = lhs$p0[i], one = lhs$p1[i], two = lhs$p2[i], three = lhs$p3[i], four = lhs$p4[i]), 
+                                 ass_v_param = lhs$ass_v_param[i], dd_param = round(lhs$dd_param[i],2), dd_upper = lhs$dd_upper[i],
+                                 matrix_tag = 1, seed_add=1, role=T, monogamy=0, cm=3, ot_max=365)
 
+g2 <- assortative_graph_generator3(type="homo", num_nodes=100, riv=c(lhs$riv1[i], lhs$riv2[i], lhs$riv3[i]), 
+                                  assortativity_kernel=lhs$assortativity_kernel[i], spatial_kernel=lhs$spatial_kernel[i], 
+                                  main_partners_prop=c(zero = lhs$p0[i], one = lhs$p1[i], two = lhs$p2[i], three = lhs$p3[i], four = lhs$p4[i]), 
+                                  ass_v_param = lhs$ass_v_param[i], dd_param = round(lhs$dd_param[i],2), dd_upper = 4,
+                                  matrix_tag = 1, seed_add=1, role=T, monogamy=0, cm=3, ot_max=365)
+
+g3 <- assortative_graph_generator3(type="sim", num_nodes=100, riv=c(lhs$riv1[i], lhs$riv2[i], lhs$riv3[i]), 
+                                   assortativity_kernel=0, spatial_kernel=lhs$spatial_kernel[i], 
+                                   main_partners_prop=c(zero = lhs$p0[i], one = lhs$p1[i], two = lhs$p2[i], three = lhs$p3[i], four = lhs$p4[i]), 
+                                   ass_v_param = lhs$ass_v_param[i], dd_param = round(lhs$dd_param[i],2), dd_upper = 50,
+                                   matrix_tag = 1, seed_add=1, role=T, monogamy=0, cm=3, ot_max=365)
+
+while (dev.cur() > 1) dev.off()
+
+png("figures/homo_hetero_msm.png", width = 1800, height = 600, res = 150)
+par(mfrow = c(1, 3), mar = c(1, 1, 3, 1))
+
+igraph::plot.igraph(g2$G, layout = layout_with_fr, vertex.size = 6, vertex.label = NA,  vertex.color = 3, vertex.frame.color=NA)
+mtext("Homogeneous", side = 3, line = -1.5, adj = 0, cex = 1, font = 2)
+
+igraph::plot.igraph(g$G, layout = layout_with_fr, vertex.size = 6, vertex.label = NA,  vertex.color = 3, vertex.frame.color=NA)
+mtext("Heterogeneous", side = 3, line = -1.5, adj = 0, cex = 1, font = 2)
+
+main_edges <- as_edgelist(g3$g_main)
+main_keys  <- apply(main_edges, 1, function(x) paste(sort(x), collapse = "|"))
+G_edges <- as_edgelist(g3$G)
+G_keys  <- apply(G_edges, 1, function(x) paste(sort(x), collapse = "|"))
+is_main <- G_keys %in% main_keys
+E(g3$G)$width <- ifelse(is_main, 1.5, 1) 
+
+igraph::plot.igraph(g3$G, layout = L, vertex.size = 6, vertex.label = NA,  vertex.color = g$role_vector, vertex.frame.color=NA, edge.lty = "solid", edge.color="black", edge.width = E(g3$G)$width)
+mtext("MSM-like", side = 3, line = -1.5, adj = 0, cex = 1, font = 2)
+
+while (dev.cur() > 1) dev.off()
+
+png("figures/main_ot_msm.png", width = 1800, height = 600, res = 150)
+par(mfrow = c(1, 3), mar = c(1, 1, 3, 1))
+L <- layout_with_fr(g3$G)
+
+igraph::plot.igraph(g3$g_ot, layout = L, vertex.size = 6, vertex.label = NA,  vertex.color = g$role_vector, vertex.frame.color=NA, edge.lty = "solid", edge.color="black", edge.width = 1)
+mtext("One-time network", side = 3, line = -1.5, adj = 0, cex = 1, font = 2)
+
+igraph::plot.igraph(g3$g_main, layout = L, vertex.size = 6, vertex.label = NA,  vertex.color = g$role_vector, vertex.frame.color=NA, edge.lty = "solid", edge.color="black", edge.width = 1.5)
+mtext("Recurrent network", side = 3, line = -1.5, adj = 0, cex = 1, font = 2)
+
+igraph::plot.igraph(g3$G, layout = L, vertex.size = 6, vertex.label = NA,  vertex.color = g$role_vector, vertex.frame.color=NA, edge.lty = "solid", edge.color="black", edge.width = E(g3$G)$width)
+mtext("MSM-like", side = 3, line = -1.5, adj = 0, cex = 1, font = 2)
+
+dev.off()
 
 ob1 <- graph_gen_outbreak_sim2(num_nodes=10000, riv=c(1/3, 1/3, 1/3), infectious_time=25, assortativity_kernel=0, main_partners_prop=c(zero=0, one=0, two=0, three=0, four=1), ass_v_param=2/3, dd_param=-1.81, dd_upper=100, matrix_tag=1, spatial_kernel=0, timesteps=500, transmission_prob=1, isolation_time_mean=30, isolation_time_sd=0, directionality=1, incubation_period=5, rec_daily=0.1)
 

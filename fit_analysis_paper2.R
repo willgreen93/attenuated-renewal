@@ -16,22 +16,20 @@ place_levels <- c("BCN", "LON", "MAD", "NYC", "SF", "HOMO", "HET", "SIM")
 id_cols <- c("model", "cutoff", "epi_phase", "place", "sr")
 full_names <- c(lrwP="LRW", R_random5="RRAND", R_biased5="RBIAS", expdelay="EXPT", incdelayP="EXPI", powdelay="POWI", sigmoidP="SIGT")
 
-skeleton_plot_sim      <- readRDS("fits/outputs/skeleton_plot_sim_all2.rds")      #%>% mutate(place=as.character(scenario), sr="SIM", epi_phase=as.numeric(as.character(epi_phase))) %>% select(day, true_value, cutoff, model, epi_phase, total_infection, lower, median, upper, cutoff2, place, sr) 
-skeleton_last_week_sim <- readRDS("fits/outputs/skeleton_last_week_sim_all2.rds") #%>% mutate(place=as.character(scenario), sr="SIM", epi_phase=as.numeric(as.character(epi_phase))) %>% select(sample, model, cutoff, epi_phase, total_infection, prediction, true_value, place, sr) 
-
-skeleton_plot_het <- readRDS("fits/outputs/skeleton_plot_het.rds")
-skeleton_last_week_het <- readRDS("fits/outputs/skeleton_last_week_het.rds")
-
-skeleton_plot_homo <- readRDS("fits/outputs/skeleton_plot_homo.rds") %>% mutate(model=ifelse(model=="sigmoidPS", "sigmoidP", model))
-skeleton_last_week_homo <- readRDS("fits/outputs/skeleton_last_week_homo.rds") %>% mutate(model=ifelse(model=="sigmoidPS", "sigmoidP", model))
+skeleton_plot_sim      <- readRDS("fits/outputs/skeleton_plot_sim_allF2.rds")      %>% mutate(model=ifelse(model=="sigmoidPS", "sigmoidP", model))
+skeleton_last_week_sim <- readRDS("fits/outputs/skeleton_last_week_sim_allF2.rds") %>% mutate(model=ifelse(model=="sigmoidPS", "sigmoidP", model))
 
 skeleton_plot_cit <- readRDS("fits/outputs/skeleton_plot_cit.rds")
 skeleton_last_week_cit <- readRDS("fits/outputs/skeleton_last_week_cit.rds")
 
-skeleton_plot <- rbind(skeleton_plot_sim, skeleton_plot_het, skeleton_plot_cit, skeleton_plot_homo)
-skeleton_last_week <- rbind(skeleton_last_week_sim, skeleton_last_week_het, skeleton_last_week_cit, skeleton_last_week_homo)
+skeleton_plot <- rbind(skeleton_plot_sim, skeleton_plot_cit)
+skeleton_last_week <- rbind(skeleton_last_week_sim, skeleton_last_week_cit)
 
-fc <- as_forecast_sample(data = skeleton_last_week, observed = "true_value", sample = "sample", forecast_unit = id_cols) %>% mutate(grouping=ifelse(sr=="CIT", place, sr))
+fc <- as_forecast_sample(data = skeleton_last_week, observed = "true_value", sample = "sample", forecast_unit = id_cols) %>% mutate(grouping = case_when(sr == "fit_sim3" ~ "SIM", 
+                                                                                                                                                         sr == "fit_homo" ~ "HOMO", 
+                                                                                                                                                         sr == "fit_het"  ~ "HET", 
+                                                                                                                                                         sr == "CIT"      ~ place, 
+                                                                                                                                                         TRUE ~ NA_character_))
 fc_log <- transform_forecasts(fc, offset = 1, append = FALSE, label = "log") 
 
 metrics     <- get_metrics(fc,     select = c("crps", "overprediction", "underprediction", "dispersion"))
@@ -178,6 +176,8 @@ comparison_func_real <- function(skeleton_plot, model_list, epi_phase_list, plac
     facet_grid(model~place, scales="free") +
     theme(panel.grid=element_blank()) 
   
+  p1
+  
   p2 <- ggplot(skeleton_plot_fil %>% filter(true_value>=1, median>=1 | day > cutoff, day > 20), aes(x=day, fill=factor(epi_phase))) +
     geom_point(aes(y=true_value), size=0.5) +
     geom_ribbon(aes(ymin=lower, ymax=upper), alpha=0.2) +
@@ -212,6 +212,7 @@ comparison_func_real <- function(skeleton_plot, model_list, epi_phase_list, plac
 }
 
 place_comp <- comparison_func_real(skeleton_plot, model_list=c("lrwP", "R_biased5", "R_random5", "sigmoidP"), epi_phase_list=c(2, 6, 10), place_list=c("BCN", "SF", "MAD", "NYC"), cutoff_graph=F, sr_list="CIT")
+place_comp <- comparison_func_real(skeleton_plot, model_list=c("sigmoidP"), epi_phase_list=c(6), place_list=c(4), cutoff_graph=F, sr_list="CIT")
 
 ggsave("figures/place_comp.png", place_comp[[2]], width=15, height=9)
 

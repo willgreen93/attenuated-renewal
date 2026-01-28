@@ -158,7 +158,7 @@ MSM_pop["SF"] <- round(145972*0.5)                # Estimating Population Sizes 
 MSM_pop["BCN"] <- round(pop["BCN"]*0.5*0.5*0.053) # https://pmc.ncbi.nlm.nih.gov/articles/PMC4594901/#:~:text=A%20total%20of%201560%20cases,was%20only%2011.9/100%2C000%20inhabitants.
 MSM_pop["MAD"] <- round(pop["MAD"]*0.5*0.5*0.053) # https://pmc.ncbi.nlm.nih.gov/articles/PMC4594901/#:~:text=A%20total%20of%201560%20cases,was%20only%2011.9/100%2C000%20inhabitants.
 
-fit_func <- function(simulation, model_name, range_limits, strat, cutoff, tag, keep_fit=F, epi_phase=NA, decay_type=NA, dir="", iter=1000, chains=4, adapt_delta=0.8){
+fit_func <- function(simulation, model_name, range_limits, strat, cutoff, tag, keep_fit=F, epi_phase=NA, decay_type=NA, dir="", iter=1000, chains=4, adapt_delta=0.9){
   model <- model_list[[model_name]]
   
   likelihood_type <- ifelse(length(range_limits)==1, 1, 2)
@@ -197,7 +197,7 @@ fit_func <- function(simulation, model_name, range_limits, strat, cutoff, tag, k
   print(paste0("Model name = ", model_name, "     Epi phase = ", epi_phase, "     Tag = ", tag), quote=F)
   
   p <- proc.time()
-  fit <- sampling(model, input_list, iter=iter, chains=chains, cores=4, seed=(4), init=init, control = list(adapt_delta = adapt_delta)) 
+  fit <- sampling(model, input_list, iter=iter, chains=chains, cores=4, seed=(15), init=init, control = list(adapt_delta = adapt_delta)) 
   
   max_Rhat <- max(summary(fit)$summary[,"Rhat"])
   divergences <- sapply(rstan::get_sampler_params(fit, inc_warmup = FALSE), function(x) sum(x[, "divergent__"]))
@@ -206,22 +206,24 @@ fit_func <- function(simulation, model_name, range_limits, strat, cutoff, tag, k
   print(paste0("Rhat = ", round(max_Rhat, 2), " Divergences = ", total_divergences), quote=F)
   
   if(max_Rhat>1.05) iter <- iter*2
-  if(total_divergences > 1) adapt_delta = 0.99
+  if(total_divergences > 1) adapt_delta = 0.95
   
   if(max_Rhat>1.05 | total_divergences >= 1){
     print(paste0("Rerunning with iter = ", iter, " and adapt_delta = ", adapt_delta), quote=F)
-    fit <- sampling(model, input_list, iter=iter, chains=chains, cores=4, seed=(5), init=init, control = list(adapt_delta = adapt_delta)) 
+    fit <- sampling(model, input_list, iter=iter, chains=chains, cores=4, seed=(16), init=init, control = list(adapt_delta = adapt_delta)) 
     max_Rhat <- max(summary(fit)$summary[,"Rhat"])
     divergences <- sapply(rstan::get_sampler_params(fit, inc_warmup = FALSE), function(x) sum(x[, "divergent__"]))
     total_divergences <- sum(divergences)
   } 
+  
+  print(paste0("Rhat = ", round(max_Rhat, 2), " Divergences = ", total_divergences), quote=F)
   
   if(max_Rhat>1.05) iter <- iter*2
   if(total_divergences > 1) adapt_delta = 0.99
   
   if(max_Rhat>1.05 | total_divergences >= 1){
     print(paste0("Rerunning with iter = ", iter, " and adapt_delta = ", adapt_delta), quote=F)
-    fit <- sampling(model, input_list, iter=iter, chains=chains, cores=4, seed=(6), init=init, control = list(adapt_delta = adapt_delta))
+    fit <- sampling(model, input_list, iter=iter, chains=chains, cores=4, seed=(17), init=init, control = list(adapt_delta = adapt_delta))
     max_Rhat <- max(summary(fit)$summary[,"Rhat"])
     divergences <- sapply(rstan::get_sampler_params(fit, inc_warmup = FALSE), function(x) sum(x[, "divergent__"]))
     total_divergences <- sum(divergences)
@@ -229,7 +231,22 @@ fit_func <- function(simulation, model_name, range_limits, strat, cutoff, tag, k
   
   max_Rhat <- max(summary(fit)$summary[,"Rhat"])
   divergences <- sapply(rstan::get_sampler_params(fit, inc_warmup = FALSE), function(x) sum(x[, "divergent__"]))
-  total_divergences <- sum(divergences)
+  
+  print(paste0("Rhat = ", round(max_Rhat, 2), " Divergences = ", total_divergences), quote=F)
+  
+  if(max_Rhat>1.05) iter <- iter*2
+  if(total_divergences > 1) adapt_delta = 0.995
+  
+  if(max_Rhat>1.05 | total_divergences >= 1){
+    print(paste0("Rerunning with iter = ", iter, " and adapt_delta = ", adapt_delta), quote=F)
+    fit <- sampling(model, input_list, iter=iter, chains=chains, cores=4, seed=(18), init=init, control = list(adapt_delta = adapt_delta))
+    max_Rhat <- max(summary(fit)$summary[,"Rhat"])
+    divergences <- sapply(rstan::get_sampler_params(fit, inc_warmup = FALSE), function(x) sum(x[, "divergent__"]))
+    total_divergences <- sum(divergences)
+  }
+  
+  max_Rhat <- max(summary(fit)$summary[,"Rhat"])
+  divergences <- sapply(rstan::get_sampler_params(fit, inc_warmup = FALSE), function(x) sum(x[, "divergent__"]))
   
   print(paste0("Rhat = ", round(max_Rhat, 2), " Divergences = ", total_divergences), quote=F)
   
@@ -275,7 +292,7 @@ model_name_list <- list()
 divergences_list <- list()
 time_taken <- list()
 
-for(j in c(list.files("simulation/sim_2/"))[42:100]){
+for(j in c(list.files("simulation/sim_2/"))[9:28]){
   simulation <- readRDS(paste0("simulation/sim_2/",j))$outbreak
   
   cum_inc <- cumsum(simulation$incidence$incidence)
@@ -287,7 +304,7 @@ for(j in c(list.files("simulation/sim_2/"))[42:100]){
   tag <- which(j==list.files("simulation/sim_2/")[1:100])
   
   for(i in times){
-    for(p in c("lrwP", "R_random5", "R_biased5", "expdelayP", "incdelayP", "powdelayP", "sigmoidP")){
+    for(p in c("expdelayP")){#"lrwP", "R_random5", "R_biased5", "expdelayP", "incdelayP", "powdelayP", "sigmoidP")){
       a5 <- fit_func(simulation, model_name=p, range_limits=c(0), strat="annual", cutoff=i, tag=tag, keep_fit=TRUE, epi_phase=which(times==i), decay_type=NA, dir="fit_sim3", iter=1000, chains=4)
       file_list[[k]] <- a5$file_name
       R_hat_list[[k]] <- a5$max_Rhat
@@ -302,7 +319,7 @@ for(j in c(list.files("simulation/sim_2/"))[42:100]){
 
 l <- 1
 
-for(j in c(list.files("simulation/sim_homo/")[2:30])){
+for(j in c(list.files("simulation/sim_homo/")[1])){
   simulation <- readRDS(paste0("simulation/sim_homo/",j))$outbreak
   
   cum_inc <- cumsum(simulation$incidence$incidence)
@@ -314,7 +331,7 @@ for(j in c(list.files("simulation/sim_homo/")[2:30])){
   tag <- which(j==list.files("simulation/sim_homo/"))
   
   for(i in times){
-    for(p in c("lrwP", "R_random5", "R_biased5", "expdelayP", "incdelayP", "powdelayP", "sigmoidPS")){
+    for(p in c("R_biased5")){#"lrwP", "R_random5", "R_biased5", "expdelayP", "incdelayP", "powdelayP", "sigmoidPS")){
       a5 <- fit_func(simulation, model_name=p, range_limits=c(0), strat="annual", cutoff=i, tag=tag, keep_fit=TRUE, epi_phase=which(times==i), decay_type=NA, dir="fit_homo") 
       file_list[[l]] <- a5$file_name
       R_hat_list[[l]] <- a5$max_Rhat
@@ -327,8 +344,13 @@ for(j in c(list.files("simulation/sim_homo/")[2:30])){
 }
 
 m <- 1
+file_list_het <- list()
+R_hat_list_het <- list()
+model_name_list_het <- list()
+divergences_list_het <- list()
+time_taken_het <- list()
 
-for(j in c(list.files("simulation/sim_het/"))){
+for(j in c(list.files("simulation/sim_het/"))[8:30]){
   #print(j)
   simulation <- readRDS(paste0("simulation/sim_het/",j))$outbreak
   
@@ -343,10 +365,10 @@ for(j in c(list.files("simulation/sim_het/"))){
   for(i in times){
     for(p in c("lrwP", "R_random5", "R_biased5", "expdelayP", "incdelayP", "powdelayP", "sigmoidP")){
       a5 <- fit_func(simulation, model_name=p, range_limits=c(0), strat="annual", cutoff=i, tag=tag, keep_fit=TRUE, epi_phase=which(times==i), decay_type=NA, dir="fit_het")
-      file_list[[m]] <- a5$file_name
-      R_hat_list[[m]] <- a5$max_Rhat
-      model_name_list[[m]] <- p
-      divergences_list[[m]] <- a5$total_divergences
+      file_list_het[[m]] <- a5$file_name
+      R_hat_list_het[[m]] <- a5$max_Rhat
+      model_name_list_het[[m]] <- p
+      divergences_list_het[[m]] <- a5$total_divergences
       m <- m+1
       cat("\n")
     }
