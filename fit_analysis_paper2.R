@@ -16,27 +16,39 @@ place_levels <- c("BCN", "LON", "MAD", "NYC", "SF", "HOMO", "HET", "SIM")
 id_cols <- c("model", "cutoff", "epi_phase", "place", "sr")
 full_names <- c(lrwP="LRW", R_random5="RRAND", R_biased5="RBIAS", expdelay="EXPT", incdelayP="EXPI", powdelay="POWI", sigmoidP="SIGT")
 
-skeleton_plot_sim      <- readRDS("fits/outputs/skeleton_plot_sim_allF2.rds")      %>% mutate(model=ifelse(model=="sigmoidPS", "sigmoidP", model))
-skeleton_last_week_sim <- readRDS("fits/outputs/skeleton_last_week_sim_allF2.rds") %>% mutate(model=ifelse(model=="sigmoidPS", "sigmoidP", model))
+files_div <- readRDS("fits/outputs/Rhat_sim.rds") %>% filter(divergences>=1) %>% mutate(scenario=as.character(scenario))
+
+skeleton_plot_sim      <- readRDS("fits/outputs/skeleton_plot_sim_all.rds")      %>% mutate(model=ifelse(model=="sigmoidPS", "sigmoidP", model))
+skeleton_plot_sim_clean <- skeleton_plot_sim %>% anti_join(files_div %>% select(model, scenario, sr, epi_phase) %>% distinct(), by = c("model", "place"="scenario", "sr", "epi_phase"))
+
+skeleton_last_week_sim <- readRDS("fits/outputs/skeleton_last_week_sim_all.rds") %>% mutate(model=ifelse(model=="sigmoidPS", "sigmoidP", model))
+skeleton_last_week_sim_clean <- skeleton_last_week_sim %>% anti_join(files_div %>% select(model, scenario, sr, epi_phase) %>% distinct(), by = c("model", "place"="scenario", "sr", "epi_phase"))
 
 skeleton_plot_cit <- readRDS("fits/outputs/skeleton_plot_cit.rds")
 skeleton_last_week_cit <- readRDS("fits/outputs/skeleton_last_week_cit.rds")
 
-skeleton_plot <- rbind(skeleton_plot_sim, skeleton_plot_cit)
-skeleton_last_week <- rbind(skeleton_last_week_sim, skeleton_last_week_cit)
+skeleton_plot <- rbind(skeleton_plot_sim_clean, skeleton_plot_cit)
+skeleton_last_week_raw <- rbind(skeleton_last_week_sim_clean, skeleton_last_week_cit)
 
-fc <- as_forecast_sample(data = skeleton_last_week, observed = "true_value", sample = "sample", forecast_unit = id_cols) %>% mutate(grouping = case_when(sr == "fit_sim3" ~ "SIM", 
-                                                                                                                                                         sr == "fit_homo" ~ "HOMO", 
-                                                                                                                                                         sr == "fit_het"  ~ "HET", 
-                                                                                                                                                         sr == "CIT"      ~ place, 
-                                                                                                                                                         TRUE ~ NA_character_))
+min_n <- skeleton_last_week_raw %>% group_by(epi_phase, place, sr, model) %>% summarise(n = n(), .groups = "drop") %>% summarise(min_n = min(n)) %>% pull(min_n)
+skeleton_last_week <- skeleton_last_week_raw %>% group_by(epi_phase, place, sr, model) %>% arrange(sample, .by_group = TRUE) %>% slice(round(seq(n()/min_n, n(), length.out = min_n))) %>% ungroup() %>% arrange(sr, place, model, epi_phase, sample)
+
+skeleton_last_week %>% group_by(epi_phase, place, sr, model) %>% summarise(n = n(), .groups = "drop")
+
+fc <- as_forecast_sample(data = skeleton_last_week, observed = "true_value", sample = "sample", forecast_unit = id_cols) %>% mutate(grouping = case_when(sr == "fit_sim3" ~ "SIM", sr == "fit_homo" ~ "HOMO", sr == "fit_het"  ~ "HET", sr == "CIT"      ~ place, TRUE ~ NA_character_))
 fc_log <- transform_forecasts(fc, offset = 1, append = FALSE, label = "log") 
 
 metrics     <- get_metrics(fc,     select = c("crps", "overprediction", "underprediction", "dispersion"))
 metrics_log <- get_metrics(fc_log, select = c("crps", "overprediction", "underprediction", "dispersion"))
 
-scoring_lin <- as.data.frame(score(fc,     metrics = metrics)) %>% mutate(measure="Linear CRPS")
-scoring_log <- as.data.frame(score(fc_log, metrics = metrics)) %>% mutate(measure="Log CRPS")
+scoring_lin0 <- as.data.frame(score(fc,     metrics = metrics)) %>% mutate(measure="Linear CRPS")
+scoring_log0 <- as.data.frame(score(fc_log, metrics = metrics)) %>% mutate(measure="Log CRPS")
+
+scoring_lin_LON <- read.csv("fits/outputs/scoring_lin_LON.csv") %>% filter(model != "sigmoidPS") %>% select(-X) %>% mutate(grouping="LON")
+scoring_log_LON <- read.csv("fits/outputs/scoring_log_LON.csv") %>% filter(model != "sigmoidPS") %>% select(-X) %>% mutate(grouping="LON")
+
+scoring_lin <- rbind(scoring_lin0, scoring_lin_LON)
+scoring_log <- rbind(scoring_log0, scoring_log_LON)
 
 scoring_results_raw0 <- rbind(scoring_lin, scoring_log) %>% 
   pivot_longer(cols = c(crps, overprediction, underprediction, dispersion), names_to = "metric", values_to = "value") %>%
@@ -212,7 +224,7 @@ comparison_func_real <- function(skeleton_plot, model_list, epi_phase_list, plac
 }
 
 place_comp <- comparison_func_real(skeleton_plot, model_list=c("lrwP", "R_biased5", "R_random5", "sigmoidP"), epi_phase_list=c(2, 6, 10), place_list=c("BCN", "SF", "MAD", "NYC"), cutoff_graph=F, sr_list="CIT")
-place_comp <- comparison_func_real(skeleton_plot, model_list=c("sigmoidP"), epi_phase_list=c(6), place_list=c(4), cutoff_graph=F, sr_list="CIT")
+#place_comp <- comparison_func_real(skeleton_plot, model_list=c("sigmoidP"), epi_phase_list=c(6), place_list=c(4), cutoff_graph=F, sr_list="CIT")
 
 ggsave("figures/place_comp.png", place_comp[[2]], width=15, height=9)
 
@@ -446,19 +458,21 @@ scoring_results_agg <- scoring_results_raw0 %>%
 scoring_results_agg %>% filter(metric=="crps") %>% mutate(value=round(value, ifelse(measure=="lin", 1, 2))) %>% tidyr::spread(grouping, value) %>% select(!metric) %>% arrange(measure, model) 
 scoring_results_agg %>% filter(metric=="crps", measure=="Log CRPS") %>% mutate(value=round(value, ifelse(measure=="lin", 1, 2))) %>% tidyr::spread(grouping, value) %>% select(!metric) %>% arrange(measure, model) %>% select(model, measure, LON, BCN, MAD, NYC, SF, HOMO, HET, SIM) %>% mutate(model=full_names[model])
 
-cit_epi_phase <- ggplot(scoring_results_raw %>% filter(grouping != "LON", measure=="Linear CRPS", metric != "crps", sr %in% c("real"))) +
+cit_epi_phase <- ggplot(scoring_results_raw %>% filter(grouping != "LON", measure=="Linear CRPS", metric != "crps", sr %in% c("CIT"))) +
   geom_bar(aes(x = epi_phase, y = value, fill = metric),
            position = "stack",
            stat = "identity", color=NA) +
-  facet_grid(grouping~model, switch = "x", scales="free_y") +
+  facet_grid(grouping~model2, switch = "x", scales="free_y") +
   theme_minimal() + 
   theme(strip.placement = "outside",
         strip.background = element_rect(fill = NA, color = "white"),
         panel.spacing = unit(-.01,"cm"),
         panel.grid=element_blank(),
-        legend.position="none") +
+        legend.position="none",
+        plot.background  = element_rect(fill = "white", colour = NA),
+        panel.background = element_rect(fill = "white", colour = NA)) +
   scale_x_continuous(breaks = scales::pretty_breaks()) +
-  labs(x="", title="CRPS measured on the linear forecasting scale")
+  labs(x="", y="CRPS", title="CRPS measured on the linear forecasting scale")
 
 ggsave("figures/crps_epi_phase_cit.png", cit_epi_phase, width=10, height=10)
 

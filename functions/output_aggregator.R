@@ -11,7 +11,7 @@ files_sim <- c(list.files("fits/sim/fit_sim3", full.names = TRUE), list.files("f
 info_sim <- file.info(files_sim)
 files_sim <- files_sim[!info_sim$isdir]
 
-sorted_files_sim <- files_sim#[order(info_sim$mtime[!info_sim$isdir], decreasing = FALSE)]
+sorted_files_sim <- files_sim[order(info_sim$mtime[!info_sim$isdir], decreasing = FALSE)]
 
 files <- sorted_files_sim
 
@@ -23,11 +23,12 @@ Rhat_list <- vector("list", length(files))
 # Thin every 10th sample (same logic as your filter(sample %% 10 == 0))
 thin_every <- 10
 
-for (ii in 1:length(sorted_files_sim)) {
-  #ii <- which(Rhat_sim$file_name==i)
+for (i in files){#
+  #ii <- length(plot_list)+1
+  #print(c(i,ii), quote=F)
   
-  #print(c(ii, which(files_rerun==i)), quote=F)
-  i <- files[ii]
+  #print(c(ii, which(files_rerun2==i)), quote=F)
+  #i <- files[ii]
   sr <- sub("^.*sim/([^/]+)/fit.*$", "\\1", i)
   # message(ii, "/", length(files), "  ", basename(i))  # optional light logging
   
@@ -54,7 +55,7 @@ for (ii in 1:length(sorted_files_sim)) {
   
   # Thin samples by row index (same as filter(sample %% 10 == 0))
   nsamp    <- nrow(pred_mat)
-  thin_idx <- which(seq_len(nsamp) %% thin_every == 0)
+  thin_idx <- seq(0, nsamp, nsamp/200)[-1] #which(seq_len(nsamp) %% thin_every == 0)
   pred_thin <- pred_mat[thin_idx, , drop = FALSE]
   
   # ---------- Fast 'inf_plot' (per-day quantiles across samples) ----------
@@ -132,19 +133,20 @@ for (ii in 1:length(sorted_files_sim)) {
 }
 
 # Bind once at the end (fast)
-saveRDS(plot_list, "fits/outputs/plot_listF2.rds")
-saveRDS(lastweek_list, "fits/outputs/lastweek_listF2.rds")
-saveRDS(Rhat_sim, "fits/outputs/Rhat_sim_F2.rds")
+saveRDS(plot_list, "fits/outputs/plot_listF.rds")
+saveRDS(lastweek_list, "fits/outputs/lastweek_listF.rds")
 
 skeleton_plot_sim      <- dplyr::bind_rows(plot_list)     %>% rename(place=scenario) %>% select(day, true_value, cutoff, model, epi_phase, total_infection, lower, median, upper, cutoff2, place, sr)
 skeleton_last_week_sim <- dplyr::bind_rows(lastweek_list) %>% rename(place=scenario) %>% select(sample, model, cutoff, epi_phase, total_infection, predicted, true_value, place, sr)
-Rhat_sim <- dplyr::bind_rows(Rhat_list) 
+Rhat_sim <- dplyr::bind_rows(Rhat_list) %>% mutate(model = str_match(basename(file_name), "^fit_(.+?)_k=")[, 2], epi_phase = as.integer(str_extract(basename(file_name), "(?<=epi_phase=)\\d+")), sr = str_match(file_name, "sim/([^/]+)/")[, 2])
 
-saveRDS(skeleton_plot_sim, "fits/outputs/skeleton_plot_sim_allF2.rds")
-saveRDS(skeleton_last_week_sim, "fits/outputs/skeleton_last_week_sim_allF2.rds")
-#saveRDS(Rhat_sim, "fits/outputs/Rhat_sim_F.rds")
+skeleton_plot_sim %>% filter(day==1) %>% group_by(place, model, epi_phase, sr) %>% summarise(count=n()) %>% filter(count>1)
+skeleton_last_week_sim %>% filter(sample==10) %>% group_by(place, model, epi_phase, sr) %>% summarise(count=n()) %>% filter(count>1)
+Rhat_sim %>% group_by(scenario, model, epi_phase, sr) %>% summarise(count=n()) %>% filter(count>1)
 
-files_rerun2 <- readRDS("fits/outputs/Rhat_sim_F2.rds") %>% filter(Rhat>1.05 | divergences >=1) %>% select(file_name) %>% pull()
+saveRDS(skeleton_plot_sim, "fits/outputs/skeleton_plot_sim_all.rds")
+saveRDS(skeleton_last_week_sim, "fits/outputs/skeleton_last_week_sim_all.rds")
+saveRDS(Rhat_sim, "fits/outputs/Rhat_sim.rds")
 
 files_cit <- list.files("fits/cities/", full.names = TRUE) 
 
@@ -153,6 +155,7 @@ files_cit <- files_cit[!info_cit$isdir]
 
 plot_list_cit     <- vector("list", length(files_cit))
 lastweek_list_cit <- vector("list", length(files_cit))
+Rhat_list_cit     <- vector("list", length(files_cit))
 
 for (ii in seq_along(files_cit)) {
   print(ii)
@@ -228,20 +231,32 @@ for (ii in seq_along(files_cit)) {
     mutate(epi_phase = as.numeric(epi_phase)) #%>%
   #mutate(!!!pl)
   
+  Rhat_div <- tibble(
+    file_name       = i,
+    scenario        = as.character(fit_output$tag),
+    model           = fit_output$model_name,
+    strata          = fit_output$input_list$k,
+    cutoff          = N,
+    epi_phase       = fit_output$epi_phase,
+    Rhat            = max(rstan::summary(fit_output$fit)$summary[,"Rhat"], na.rm=T),
+    divergences     = sum(sapply(rstan::get_sampler_params(fit_output$fit, inc_warmup = FALSE), function(x) sum(x[, "divergent__"]))),
+    sr = sr
+  )
+  
   # Accumulate (no rbind inside loop)
   plot_list_cit[[ii]]     <- inf_plot
   lastweek_list_cit[[ii]] <- inf_last_week
+  Rhat_list_cit[[ii]] <- Rhat_div
+  
 }
 
 skeleton_plot_cit      <- dplyr::bind_rows(plot_list_cit)     %>% mutate(sr="CIT") %>% select(day, true_value, cutoff, model, epi_phase, total_infection, lower, median, upper, cutoff2, place, sr)
 skeleton_last_week_cit <- dplyr::bind_rows(lastweek_list_cit) %>% mutate(sr="CIT") %>% select(sample, model, cutoff, epi_phase, total_infection, predicted, true_value, place, sr)
+Rhat_cit <- dplyr::bind_rows(Rhat_list_cit) 
 
 saveRDS(skeleton_plot_cit, "fits/outputs/skeleton_plot_cit.rds")
 saveRDS(skeleton_last_week_cit, "fits/outputs/skeleton_last_week_cit.rds")
-
-
-
-
+saveRDS(Rhat_cit, "fits/outputs/Rhat_cit.rds")
 
 
 
