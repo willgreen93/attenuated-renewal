@@ -4,7 +4,6 @@ library(ggplot2)
 library(igraph)
 library(EpiEstim)
 library(profvis)
-library(igraph)
 library(truncnorm)
 
 setwd("~/attenuated-renewal")
