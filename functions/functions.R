@@ -6,8 +6,6 @@ library(EpiEstim)
 library(profvis)
 library(truncnorm)
 
-setwd("~/attenuated-renewal")
-
 word_to_num <- c("one" = 1, "two" = 2, "three" = 3, "four" = 4)
 
 main_ot_partners_generator2 <- function(type="hetero", num_nodes=1000, dd_upper=100, dd_param=-1.81, main_partners_prop=c(zero = 0.3, one = 0.45, two = 0.125, three = 0.098, four = 0.027), monogamy=0) {

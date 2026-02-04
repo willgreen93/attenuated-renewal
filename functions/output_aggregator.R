@@ -1,5 +1,3 @@
-setwd("~/attenuated-renewal")
-
 # Fast dependencies
 library(dplyr)
 library(tibble)

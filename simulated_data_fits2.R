@@ -17,8 +17,6 @@ library(epinowcast)
 library(lubridate)
 library(runjags)
 
-setwd("~/attenuated-renewal")
-
 ranges_generator <- function(simulation, range_limits, strat){
   if(strat=="annual") incidence_strat <- simulation$incidence_matrix_annual
   if(strat=="infectious_period") incidence_strat <- simulation$incidence_matrix_nw
