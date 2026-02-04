@@ -4,10 +4,7 @@ library(ggplot2)
 library(igraph)
 library(EpiEstim)
 library(profvis)
-library(igraph)
 library(truncnorm)
-
-setwd("~/attenuated-renewal")
 
 word_to_num <- c("one" = 1, "two" = 2, "three" = 3, "four" = 4)
 
@@ -182,8 +179,8 @@ full_adj_list <- function(adj_list_named, node_set, num_nodes) {
   return(full)
 }
 
-build_graph_adj_list <- function(num_nodes_g, nodes, degrees_raw, tot_degree_vec, role_vec, role_matrix, x, y, assortativity_kernel, spatial_kernel, adj_list_ot=NULL, cm) {
-  set.seed(1)
+build_graph_adj_list <- function(num_nodes_g, nodes, degrees_raw, tot_degree_vec, role_vec, role_matrix, x, y, assortativity_kernel, spatial_kernel, adj_list_ot=NULL, cm, seed = NULL) {
+  if (!is.null(seed)) set.seed(seed)
   adj_list <- vector("list", length = num_nodes_g)
   degrees <- degrees_raw
   
@@ -399,8 +396,8 @@ subgraph_generator <- function(graph, infectious_nodes, neighbors_of_infecteds_u
   return(adj_matrix)
 }
 
-outbreak_simulator_fast4 <- function(timesteps=300, infectious_time=25, initial_exposed=1, transmission_prob=0.5, isolation_time_mean=25, isolation_time_sd=0, directionality=1, incubation_period=5, matrix_tag=1, tag="", monogamy=0, rec_daily=0.1, g){
-  set.seed(2)
+outbreak_simulator_fast4 <- function(timesteps=300, infectious_time=25, initial_exposed=1, transmission_prob=0.5, isolation_time_mean=25, isolation_time_sd=0, directionality=1, incubation_period=5, matrix_tag=1, tag="", monogamy=0, rec_daily=0.1, g, seed = NULL){
+  if (!is.null(seed)) set.seed(seed)
   
   if(is.null(g)) g <- readRDS(paste0("mixing_matricies/G_", num_nodes, "_infectious_time=", infectious_time, "_assortativity_kernel=", assortativity_kernel, "_spatial_kernel=", spatial_kernel, "_role=", role, "_role_ass=", round(ass_v_param,2), "_", matrix_tag, "_dd=", dd_param, "_d_lim=", dd_upper,"_monogamy=", monogamy, ".rds"))
   
