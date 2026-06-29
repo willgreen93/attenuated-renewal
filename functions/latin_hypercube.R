@@ -5,11 +5,11 @@ set.seed(1)
 n_samples <- 100
 
 # 1. Latin Hypercube for 11 independent variables
-lhs_matrix <- randomLHS(n_samples, 13)
+lhs_matrix <- randomLHS(n_samples, 14)
 colnames(lhs_matrix) <- c("num_nodes", "assortativity_kernel", "ass_v_param", "spatial_kernel", "transmission_prob", 
                           "isolation_time_mean", "isolation_time_sd", "directionality", 
                           "incubation_period", "rec_daily", "infectious_time",
-                          "dd_param", "dd_upper")
+                          "dd_param", "dd_upper", "vers")
 
 sample_simplex <- function(u) {
   # u is a vector of length k-1 in (0,1)
@@ -54,11 +54,13 @@ lhs_full <- cbind(lhs_matrix, lhs_riv, lhs_main)
 # 5. Transform variables to their real-world ranges (example ranges)
 lhs <- as.data.frame(lhs_full) %>%
   dplyr::mutate(
-    num_nodes = round(scales::rescale(num_nodes, to = c(25000, 50000))),
-    assortativity_kernel = scales::rescale(assortativity_kernel, to = c(-0.5, 0.5)),
-    ass_v_param = scales::rescale(ass_v_param, to = c(0.5, 0.85)),
+    tag=1:nrow(lhs_full),
+    num_nodes = round(scales::rescale(num_nodes, to = c(10000, 50000))),
+    assortativity_kernel = scales::rescale(assortativity_kernel, to = c(-0.5, 1)),
+    ass_v_param = scales::rescale(ass_v_param, to = c(-0.5, 1)),
     spatial_kernel = scales::rescale(spatial_kernel, to = c(0, 3)),
-    transmission_prob = scales::rescale(transmission_prob, to = c(0.3, 0.7)),
+    vers = scales::rescale(vers, to = c(0.4, 0.6)),
+    transmission_prob = scales::rescale(transmission_prob, to = c(0.2, 0.5)),
     isolation_time_mean = round(scales::rescale(isolation_time_mean, to = c(45))),
     isolation_time_sd = scales::rescale(isolation_time_sd, to = c(0)),
     directionality = scales::rescale(directionality, to = c(1, 5)),
@@ -66,7 +68,7 @@ lhs <- as.data.frame(lhs_full) %>%
     rec_daily = scales::rescale(rec_daily, to = c(0.05, 0.2)),
     infectious_time = round(scales::rescale(infectious_time, to = c(15, 45))),
     dd_param = scales::rescale(dd_param, to = c(-2, -1.6)),
-    dd_upper = round(scales::rescale(dd_upper, to = c(800, 1200)))
+    dd_upper = round(scales::rescale(dd_upper, to = c(100, 500)))
   )
 
 # lhs homogeneous
