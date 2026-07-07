@@ -2,8 +2,6 @@ library(stringr)
 
 files <- c(list.files("fits/sim/MSM_like/", full.names=T), list.files("fits/sim/homo/", full.names=T), list.files("fits/sim/hetero/", full.names=T), list.files("fits/cities/", full.names=T))
 
-files2 <- files[order(network, model, epi_phase, tags)]
-
 files2 <- files[grepl("sigmoidP9", files) | grepl("expI4", files) | grepl("lrwP", files) | grepl("R_random5", files) | grepl("R_biased5", files)]
 model     <- sub(".*fit_(.*)_k=.*", "\\1", files2)
 epi_phase <- as.numeric(sub(".*epi_phase=(\\d+)_.*", "\\1", files2))
