@@ -1,9 +1,16 @@
 mixing_matricies/
+mixing_matricies2/
 simulation/
+simulation2/
 fits/
+fits2/
 no/
 IDM/
 UKHSA/
 figures/
 data/
 old/
+review/
+.claude/
+.Rhistory
+*.swp

@@ -208,6 +208,142 @@ build_graph_adj_list <- function(num_nodes_g, nodes, degrees_raw, tot_degree_vec
   return(adj_list_final)
 }
 
+build_graph_adj_list_global <- function(num_nodes_g, nodes, degrees_raw, tot_degree_vec, role_vec, role_matrix, x, y, assortativity_kernel, spatial_kernel, adj_list_ot = NULL, max_steps = 1e7, seed = 1, verbose = FALSE) {
+  set.seed(seed)
+  
+  # residual degree
+  degrees_left <- as.integer(degrees_raw)
+  
+  # adjacency stored in local indexing 1:num_nodes_g
+  adj_list <- vector("list", length = num_nodes_g)
+  for (i in seq_len(num_nodes_g)) adj_list[[i]] <- integer(0)
+  
+  # helper: get feasible partners for node i from the full residual graph
+  get_candidates <- function(i) {
+    if (degrees_left[i] <= 0) return(integer(0))
+    
+    # all other nodes with remaining degree
+    cand <- which(degrees_left > 0)
+    cand <- cand[cand != i]
+    
+    if (length(cand) == 0) return(integer(0))
+    
+    # exclude already-connected neighbours
+    if (length(adj_list[[i]]) > 0) {
+      cand <- setdiff(cand, adj_list[[i]])
+    }
+    
+    if (length(cand) == 0) return(integer(0))
+    
+    # role compatibility
+    role_i <- role_vec[i]
+    if (role_i == 1) {
+      cand <- cand[role_vec[cand] %in% c(2, 3)]
+    } else if (role_i == 2) {
+      cand <- cand[role_vec[cand] %in% c(1, 3)]
+    }
+    
+    if (length(cand) == 0) return(integer(0))
+    
+    # exclude OT-overlap if provided
+    if (!is.null(adj_list_ot)) {
+      node_name <- as.character(nodes[i])
+      ot_neigh_names <- adj_list_ot[[node_name]]
+      
+      if (!is.null(ot_neigh_names) && length(ot_neigh_names) > 0) {
+        ot_neigh_local <- match(ot_neigh_names, nodes)
+        ot_neigh_local <- ot_neigh_local[!is.na(ot_neigh_local)]
+        cand <- setdiff(cand, ot_neigh_local)
+      }
+    }
+    
+    cand
+  }
+  
+  # helper: sample one partner for node i
+  sample_partner <- function(i, candidates) {
+    deg_i <- tot_degree_vec[i]
+    deg_cand <- tot_degree_vec[candidates]
+    
+    dx <- x[i] - x[candidates]
+    dy <- y[i] - y[candidates]
+    
+    assort_weights <- exp(-assortativity_kernel * abs(log(deg_i) - log(deg_cand)))
+    role_weights <- role_matrix[role_vec[i], role_vec[candidates]]
+    spatial_weights <- exp(-spatial_kernel * sqrt(dx^2 + dy^2))
+    
+    # retain some bias toward candidates with residual capacity
+    residual_weights <- degrees_left[candidates]
+    
+    w <- assort_weights * role_weights * spatial_weights * residual_weights
+    
+    if (all(!is.finite(w)) || sum(w) <= 0) {
+      return(sample(candidates, size = 1))
+    }
+    
+    w <- w / sum(w)
+    sample(candidates, size = 1, prob = w)
+  }
+  
+  total_stubs_initial <- sum(degrees_left)
+  step <- 0L
+  
+  repeat {
+    step <- step + 1L
+    if (step > max_steps) {
+      warning("Reached max_steps before exhaustion.")
+      break
+    }
+    
+    # stop if fewer than 2 residual stubs
+    if (sum(degrees_left) < 2) break
+    
+    # nodes with residual degree
+    active <- which(degrees_left > 0)
+    if (length(active) < 2) break
+    
+    # choose among highest residual degree nodes
+    max_deg <- max(degrees_left[active])
+    focal_pool <- active[degrees_left[active] == max_deg]
+    
+    # random tie-break among hardest nodes
+    i <- sample(focal_pool, 1)
+    
+    candidates <- get_candidates(i)
+    
+    # if this node is stuck, mark it temporarily impossible and move on
+    if (length(candidates) == 0) {
+      degrees_left[i] <- 0
+      next
+    }
+    
+    j <- sample_partner(i, candidates)
+    
+    # add undirected edge
+    adj_list[[i]] <- c(adj_list[[i]], j)
+    adj_list[[j]] <- c(adj_list[[j]], i)
+    
+    # decrement one stub from each end
+    degrees_left[i] <- degrees_left[i] - 1L
+    degrees_left[j] <- degrees_left[j] - 1L
+    
+    if (verbose && step %% 10000 == 0) {
+      cat(
+        "step =", step,
+        " residual =", sum(degrees_left),
+        " proportion remaining =", round(sum(degrees_left) / total_stubs_initial, 4),
+        "\n"
+      )
+    }
+  }
+  
+  # map back from local indices to whole-network node labels
+  names(adj_list) <- as.character(nodes)
+  adj_list_final <- lapply(adj_list, function(nei) sort(nodes[nei]))
+  
+  return(adj_list_final)
+}
+
 assortative_graph_generator2 <- function(type, num_nodes, riv, assortativity_kernel, spatial_kernel, main_partners_prop, ass_v_param, dd_param, dd_upper, matrix_tag, seed_add, role, monogamy, cm, ot_max=365) {
   set.seed(seed_add)
   partners <- main_ot_partners_generator2(type, num_nodes, dd_upper, dd_param, main_partners_prop, monogamy)
@@ -330,13 +466,192 @@ assortative_graph_generator3 <- function(type, num_nodes, riv, assortativity_ker
   
   output <- list(num_nodes = num_nodes, g_main = g_main, g_ot = g_ot, G = G, tot_partners = tot_deg, main_partners = main_deg, ot_partners = ot_deg, riv = as.vector(table(role_vector)/sum(table(role_vector))), role_vector = role_vector, role = role, monogamy=monogamy,
                  ass_v_param = ass_v_param, assortativity_kernel = assortativity_kernel, spatial_kernel = spatial_kernel, dd_param = dd_param, dd_upper = dd_upper, matrix_tag = matrix_tag,
-                 main_partners_prop = main_partners_prop)
+                 main_partners_prop = main_partners_prop, coords=coords)
   
-  saveRDS(output, file = paste0("mixing_matricies/G_", num_nodes, "_assortativity_kernel=", assortativity_kernel, "_spatial_kernel=", spatial_kernel, "_role=", role, "_role_ass=", round(ass_v_param, 2),
+  saveRDS(output, file = paste0("mixing_matricies2/G_", num_nodes, "_assortativity_kernel=", assortativity_kernel, "_spatial_kernel=", spatial_kernel, "_role=", role, "_role_ass=", round(ass_v_param, 2),
                                 "_", matrix_tag, "_dd=", dd_param, "_d_lim=", dd_upper, "_monogamy=", monogamy, ".rds"))
   
   return(output)
 }
+
+assortative_graph_generator4 <- function(type, num_nodes, riv, assortativity_kernel, spatial_kernel, main_partners_prop, ass_v_param, dd_param, dd_upper, matrix_tag, tag, seed_add, role, monogamy, cm, ot_max=365) {
+  set.seed(seed_add)
+  partners <- main_ot_partners_generator2(type, num_nodes, dd_upper, dd_param, main_partners_prop, monogamy=0)
+  
+  main_deg <- partners$main_partners
+  ot_deg <- partners$ot_partners
+  tot_deg <- partners$tot_partners
+  
+  if(sum(ot_deg)%%2 != 0) ot_deg <- ot_deg + replace(rep(0, length(ot_deg)), sample(length(ot_deg), 1), 1)
+  if(sum(main_deg)%%2 != 0) main_deg <- main_deg + replace(rep(0, length(main_deg)), sample(length(main_deg), 1), 1)
+  
+  role_vector <- if (role) sample(c(1, 2, 3), size = num_nodes, replace = TRUE, prob = riv) else rep(3, num_nodes)
+  
+  role_matrix_base <- matrix(c(0, 1/2, 1/2, 1/2, 0, 1/2, 1/2, 1/2, 0), nrow = 3)
+  role_matrix_adj <- matrix(c(0, 1/2, -1/2, 1/2, 0, -1/2, -1/2, -1/2, 1), nrow = 3)
+  role_matrix <- role_matrix_base + ass_v_param * role_matrix_adj
+  
+  # Identify nodes for each network
+  main_nodes <- which(main_deg > 0)
+  ot_nodes <- which(ot_deg > 0)
+  
+  coords <- generate_coordinates(num_nodes)
+  coords_main <- list(x=coords$x[main_nodes], y=coords$y[main_nodes])
+  coords_ot <- list(x=coords$x[ot_nodes], y=coords$y[ot_nodes])
+  
+  # Build adj list for OT partners
+  adj_list_ot <- build_graph_adj_list(num_nodes_g=length(ot_nodes), nodes=ot_nodes, degrees_raw=ot_deg[ot_deg > 0], tot_degree_vec=tot_deg[ot_nodes], 
+                                      role_vec=role_vector[ot_nodes], role_matrix=role_matrix, x=coords_ot$x, y=coords_ot$y, 
+                                      assortativity_kernel=assortativity_kernel, spatial_kernel=spatial_kernel, adj_list_ot=NULL, cm=cm)
+  
+  #for(i in 1:length(ot_nodes)) if(length(adj_list_ot[[as.character(i)]]) != ot_deg[i]) print(i)
+  
+  # Build adj list for main partners
+  adj_list_main <- build_graph_adj_list(num_nodes_g=length(main_nodes), nodes=main_nodes, degrees_raw=main_deg[main_deg > 0], tot_degree_vec=tot_deg[main_nodes], 
+                                        role_vec=role_vector[main_nodes], role_matrix=role_matrix, coords_main$x, coords_main$y, 
+                                        assortativity_kernel=assortativity_kernel, spatial_kernel=spatial_kernel, adj_list_ot=adj_list_ot, cm=cm)
+  
+  #for(i in 1:length(main_nodes)) if(length(adj_list_main[[as.character(i)]]) != main_deg[i]) print(i)
+  
+  
+  # Build full adjacency lists
+  list_main <- full_adj_list(adj_list_main, main_nodes, num_nodes)
+  list_ot   <- full_adj_list(adj_list_ot, ot_nodes, num_nodes)
+  
+  g_main <- igraph::simplify(igraph::graph_from_adj_list(list_main, mode = "all"))
+  g_ot   <- igraph::simplify(igraph::graph_from_adj_list(list_ot, mode = "all"))
+  
+  # Optionally add edge attributes
+  E(g_main)$source <- "main"
+  E(g_ot)$source   <- "ot"
+  E(g_ot)$day <- sample(1:ot_max, ecount(g_ot), replace = TRUE)
+  
+  # Combine graphs
+  G <- igraph::union(g_main, g_ot)
+  
+  output <- list(num_nodes = num_nodes, g_main = g_main, g_ot = g_ot, G = G, tot_partners = tot_deg, main_partners = main_deg, ot_partners = ot_deg, riv = as.vector(table(role_vector)/sum(table(role_vector))), role_vector = role_vector, role = role, monogamy=monogamy,
+                 ass_v_param = ass_v_param, assortativity_kernel = assortativity_kernel, spatial_kernel = spatial_kernel, dd_param = dd_param, dd_upper = dd_upper, matrix_tag = matrix_tag,
+                 main_partners_prop = main_partners_prop, coords=coords, tag=tag)
+  
+  saveRDS(output, file = paste0("mixing_matricies2/G_", num_nodes, "_ass_kernel=", assortativity_kernel, "_spatial_kernel=", spatial_kernel, "_role=", role, "_role_ass=", round(ass_v_param, 2),
+                                "_", matrix_tag, "_dd=", dd_param, "_d_lim=", dd_upper, "_monogamy=", monogamy, "tag=", tag, ".rds"))
+  
+  return(output)
+}
+
+assortative_graph_generator5 <- function(type, num_nodes, riv, assortativity_kernel, spatial_kernel, main_partners_prop, ass_v_param, dd_param, dd_upper, matrix_tag, tag, seed_add, role, monogamy, cm, ot_max=365) {
+  set.seed(seed_add)
+  partners <- main_ot_partners_generator2(type, num_nodes, dd_upper, dd_param, main_partners_prop, monogamy=0)
+  
+  main_deg <- partners$main_partners
+  ot_deg <- partners$ot_partners
+  tot_deg <- partners$tot_partners
+  
+  if(sum(ot_deg)%%2 != 0) ot_deg <- ot_deg + replace(rep(0, length(ot_deg)), sample(length(ot_deg), 1), 1)
+  if(sum(main_deg)%%2 != 0) main_deg <- main_deg + replace(rep(0, length(main_deg)), sample(length(main_deg), 1), 1)
+  
+  role_vector <- if (role) sample(c(1, 2, 3), size = num_nodes, replace = TRUE, prob = riv) else rep(3, num_nodes)
+  
+  role_matrix_base <- matrix(c(0, 1/2, 1/2, 1/2, 0, 1/2, 1/2, 1/2, 0), nrow = 3)
+  role_matrix_adj <- matrix(c(0, 1/2, -1/2, 1/2, 0, -1/2, -1/2, -1/2, 1), nrow = 3)
+  role_matrix <- role_matrix_base + ass_v_param * role_matrix_adj
+  
+  # Identify nodes for each network
+  main_nodes <- which(main_deg > 0)
+  ot_nodes <- which(ot_deg > 0)
+  
+  coords <- generate_coordinates(num_nodes)
+  coords_main <- list(x=coords$x[main_nodes], y=coords$y[main_nodes])
+  coords_ot <- list(x=coords$x[ot_nodes], y=coords$y[ot_nodes])
+  
+  # Build adj list for OT partners
+  adj_list_ot <- build_graph_adj_list_global(num_nodes_g=length(ot_nodes), nodes=ot_nodes, degrees_raw=ot_deg[ot_deg > 0], tot_degree_vec=tot_deg[ot_nodes], 
+                                      role_vec=role_vector[ot_nodes], role_matrix=role_matrix, x=coords_ot$x, y=coords_ot$y, 
+                                      assortativity_kernel=assortativity_kernel, spatial_kernel=spatial_kernel, adj_list_ot=NULL)
+  
+  #for(i in 1:length(ot_nodes)) if(length(adj_list_ot[[as.character(i)]]) != ot_deg[i]) print(i)
+  
+  # Build adj list for main partners
+  adj_list_main <- build_graph_adj_list_global(num_nodes_g=length(main_nodes), nodes=main_nodes, degrees_raw=main_deg[main_deg > 0], tot_degree_vec=tot_deg[main_nodes], 
+                                        role_vec=role_vector[main_nodes], role_matrix=role_matrix, coords_main$x, coords_main$y, 
+                                        assortativity_kernel=assortativity_kernel, spatial_kernel=spatial_kernel, adj_list_ot=adj_list_ot)
+  
+  #for(i in 1:length(main_nodes)) if(length(adj_list_main[[as.character(i)]]) != main_deg[i]) print(i)
+  
+  
+  # Build full adjacency lists
+  list_main <- full_adj_list(adj_list_main, main_nodes, num_nodes)
+  list_ot   <- full_adj_list(adj_list_ot, ot_nodes, num_nodes)
+  
+  g_main <- igraph::simplify(igraph::graph_from_adj_list(list_main, mode = "all"))
+  g_ot   <- igraph::simplify(igraph::graph_from_adj_list(list_ot, mode = "all"))
+  
+  # Optionally add edge attributes
+  E(g_main)$source <- "main"
+  E(g_ot)$source   <- "ot"
+  E(g_ot)$day <- sample(1:ot_max, ecount(g_ot), replace = TRUE)
+  
+  # Combine graphs
+  G <- igraph::union(g_main, g_ot)
+  
+  output <- list(num_nodes = num_nodes, g_main = g_main, g_ot = g_ot, G = G, tot_partners = tot_deg, main_partners = main_deg, ot_partners = ot_deg, riv = as.vector(table(role_vector)/sum(table(role_vector))), role_vector = role_vector, role = role, monogamy=monogamy,
+                 ass_v_param = ass_v_param, assortativity_kernel = assortativity_kernel, spatial_kernel = spatial_kernel, dd_param = dd_param, dd_upper = dd_upper, matrix_tag = matrix_tag,
+                 main_partners_prop = main_partners_prop, coords=coords, tag=tag)
+  
+  saveRDS(output, file = paste0("mixing_matricies2/G_", num_nodes, "_ass_kernel=", assortativity_kernel, "_spatial_kernel=", spatial_kernel, "_role=", role, "_role_ass=", round(ass_v_param, 2),
+                                "_", matrix_tag, "_dd=", dd_param, "_d_lim=", dd_upper, "_monogamy=", monogamy, "tag=", tag, ".rds"))
+  
+  return(output)
+}
+
+
+for(i in seq(1/12,11/12,1/12)){
+  l <- assortative_graph_generator4(type="hetero", num_nodes = 1000, riv = c(1/3, 1/3, 1/3), assortativity_kernel = 0, spatial_kernel = 0, main_partners_prop = c(zero = 1, one = 0, two = 0, three = 0, four = 0),
+                                    ass_v_param = i, dd_param = -1.8, dd_upper = 22, matrix_tag = 1, seed_add=1, role=T, monogamy=0, cm=3, ot_max=365)
+
+  df_raw <- data.frame(num_nodes=l$num_nodes,
+             alpha_param=fit_trunc_powerlaw_alpha(deg=degree(l$G), l$dd_upper, alpha_init=2)$alpha_hat,
+             #assortativity_ot=assortativity_degree(l$g_ot),
+             assortativity_G=assortativity_degree(l$G),
+             assortativity=l$assortativity_kernel,
+             clustering=transitivity(l$G, type = "global"),
+             max_degree=max(degree(l$G)),
+             ass_v_param=l$ass_v_param,
+             vers_assortativity=compute_versatile_assortativity(l$G, l$role_vector)$prop_partner_based,
+             #vers_assortativity2=compute_versatile_assortativity(l$G, l$role_vector)$ratio_vs_random,
+             mean_edge_distance=compute_edge_distance_stats(l$G, l$coords$x, l$coords$y)[[1]],
+             sd_edge_distance=compute_edge_distance_stats(l$G, l$coords$x, l$coords$y)[[2]],
+             biggest_cluster=max(components(l$G)$csize)/l$num_nodes)
+  
+  if(i == 1/12) df <- df_raw
+  else df <- rbind(df, df_raw)
+  
+}
+
+df[,c("ass_v_param","vers_assortativity")]
+
+plot(df$ass_v_param,  df$vers_assortativity) 
+
+w1 <- assortative_graph_generator4(type="hetero", num_nodes = 5000, riv = c(1/6, 1/6, 2/3), assortativity_kernel = 0, spatial_kernel = 0, main_partners_prop = c(zero = 1, one = 0, two = 0, three = 0, four = 0),
+                             ass_v_param = 0.33, dd_param = -1.8, dd_upper = 22, matrix_tag = 1, seed_add=1, role=T, monogamy=0, cm=3, ot_max=365, tag="AA")
+
+w2 <- assortative_graph_generator5(type="hetero", num_nodes = 5000, riv = c(1/6, 1/6, 2/3), assortativity_kernel = 0, spatial_kernel = 0, main_partners_prop = c(zero = 1, one = 0, two = 0, three = 0, four = 0),
+                                  ass_v_param = 0.33, dd_param = -1.8, dd_upper = 22, matrix_tag = 1, seed_add=1, role=T, monogamy=0, cm=3, ot_max=365, tag="AA")
+
+data.frame(num_nodes=w$num_nodes,
+           alpha_param=fit_trunc_powerlaw_alpha(deg=degree(w$G), w$dd_upper, alpha_init=2)$alpha_hat,
+           #assortativity_ot=assortativity_degree(w$g_ot),
+           assortativity_G=assortativity_degree(w$G),
+           assortativity=w$assortativity_kernel,
+           clustering=transitivity(w$G, type = "global"),
+           max_degree=max(degree(w$G)),
+           vers_assortativity=compute_versatile_assortativity(w$G, w$role_vector)$prop_partner_based,
+           vers_assortativity2=w$ass_v_param,
+           #vers_assortativity2=compute_versatile_assortativity(w$G, w$role_vector)$ratio_vs_random,
+           mean_edge_distance=compute_edge_distance_stats(w$G, w$coords$x, w$coords$y)[[1]],
+           sd_edge_distance=compute_edge_distance_stats(w$G, w$coords$x, w$coords$y)[[2]],
+           biggest_cluster=max(components(w$G)$csize)/w$num_nodes)
+
 
 
 get_adj_matrix_between_nodes <- function(g, infectious_nodes, susceptible_nodes, attr = NULL) {
@@ -405,7 +720,7 @@ outbreak_simulator_fast4 <- function(timesteps=300, infectious_time=25, initial_
   g_main <- g$g_main
   G <- g$G
   num_nodes <- length(V(g$G))
-  role_vec <- g$role_vector
+  role_vec <- g$params$roles #_vector
   
   param_list <- list(num_nodes = num_nodes, timesteps=timesteps, assortativity = g$assortativity_kernel, spatial = g$spatial_kernel, monogamy = g$monogamy, dd_upper = g$dd_upper, dd_param = g$dd_param,  
                      transmission_prob = transmission_prob, infectious_time = infectious_time, directionality = directionality, ass_v_param = g$ass_v_param, matrix_tag = matrix_tag, incubation_period = incubation_period, tag = tag, 
@@ -614,42 +929,102 @@ outbreak_simulator_fast4 <- function(timesteps=300, infectious_time=25, initial_
                  n_connections_comparison=n_connections_comparison, 
                  state_matrix=state_matrix)
   
-  #saveRDS(output, paste0("simulation/epidemic_", num_nodes, "_ass_", g$assortativity_kernel, "_spatial=", g$spatial_kernel ,"_role=", g$role, "_monogamy=", monogamy, "_role_ass=", round(g$ass_v_param,2), 
-  #                       "_iso_mean=",isolation_time_mean, "_iso_sd=", isolation_time_sd,"_dd=", g$dd_param, "_d_lim=", g$dd_upper, "_beta_", transmission_prob, "_infectious_time=", infectious_time, "_directionality_", directionality, "_incu_", incubation_period, "_tag_", tag, "_matrix_", matrix_tag, "_5.rds"))
+  #saveRDS(output, paste0("simulation2/epidemic_", num_nodes, "_ass_", g$assortativity_kernel, "_spatial=", g$spatial_kernel ,"_role=", g$role, "_mono=", monogamy, "_role_ass=", round(g$ass_v_param,2), 
+  #                       "_iso_mean=",isolation_time_mean, "_iso_sd=", isolation_time_sd,"_dd=", g$dd_param, "_d_lim=", g$dd_upper, "_beta_", round(transmission_prob,2), "_infectious_time=", infectious_time, "_directionality_", directionality, "_incu_", incubation_period, "_tag_", tag, "_matrix_", matrix_tag, "_5.rds"))
   
   return(output)
   
 }
 
-g <- assortative_graph_generator2(num_nodes=100, riv=c(1/3, 1/3, 1/3), assortativity_kernel=0, spatial_kernel=0, main_partners_prop=c(zero = 0, one = 1, two = 0, three = 0, four = 0), ass_v_param=2/3, dd_param=-1.81, dd_upper=15, matrix_tag=1, seed_add=1, role=T, monogamy=0, cm=3)
-igraph::plot.igraph(g$G, layout = layout_with_fr, vertex.size = 6, vertex.label = NA,  vertex.color = g$role_vector, vertex.frame.color=NA)
+
+png("figures/msm_network_examples2.png", width = 1800, height = 700, res = 150)
+par(mfrow = c(1, 3), mar = c(5, 1, 3, 1))
+
+seed_add <- 19
+mean_degree <- 1
+g <- NULL
+
+while (is.null(g)) {
+  g <- tryCatch(
+    assortative_graph_generator5(type="hetero", num_nodes=100, riv=c(1/3, 1/3, 1/3), assortativity_kernel=0, spatial_kernel=0,main_partners_prop=c(zero = 1, one = 0, two = 0, three = 0, four = 0),
+                                 ass_v_param=1/3, dd_param=-1.81, dd_upper=15, matrix_tag=1, seed_add=seed_add, role=T, monogamy=0, cm=3, tag=1),
+    error = function(e) {
+      message("Seed ", seed_add, " failed: ", e$message)
+      seed_add <<- seed_add + 1
+      NULL
+    }
+  )
+  
+}
+igraph::plot.igraph(g$G, layout = layout_with_fr, vertex.size = 6, vertex.label = NA, vertex.color = g$role_vector, vertex.frame.color=NA)
 mtext("A", side = 3, line = -1.5, adj = 0, cex = 1, font = 2)
+mtext(paste0("α = -1.81   Mean degree = ", round(mean(igraph::degree(g$G)), 1)),
+      side = 1, line = 0.5, cex = 0.8)
+mtext(bquote(zeta[measured] == .(round(igraph::assortativity_degree(g$G), 3)) ~~ 
+               rho[measured] == .(round(compute_versatile_assortativity(g$G, g$role_vector)$prop_edge_based, 3))),
+      side = 1, line = 2.5, cex = 0.8)
 
-g1 <- assortative_graph_generator2(num_nodes=100, riv=c(1/3, 1/3, 1/3), assortativity_kernel=0.5, spatial_kernel=0, main_partners_prop=c(zero = 1, one = 0, two = 0, three = 0, four = 0), ass_v_param=2/3, dd_param=-1.81, dd_upper=15, matrix_tag=1, seed_add=1, role=T, monogamy=0, cm=3)
-igraph::plot.igraph(g1$G, layout = layout_with_fr, vertex.size = 6, vertex.label = NA,  vertex.color = g$role_vector, vertex.frame.color=NA)
+seed_add <- 1
+g1 <- NULL
+
+while (is.null(g1)) {
+  g1 <- tryCatch(
+    assortative_graph_generator5(type="hetero", num_nodes=100, riv=c(1/3, 1/3, 1/3), assortativity_kernel=0.3, spatial_kernel=0,main_partners_prop=c(zero = 1, one = 0, two = 0, three = 0, four = 0),
+                                 ass_v_param=1/3, dd_param=-1.81, dd_upper=15, matrix_tag=1, seed_add=seed_add, role=T, monogamy=0, cm=3, tag=1),
+    error = function(e) {
+      message("Seed ", seed_add, " failed: ", e$message)
+      seed_add <<- seed_add + 1
+      NULL
+    }
+  )
+}
+igraph::plot.igraph(g1$G, layout = layout_with_fr, vertex.size = 6, vertex.label = NA, vertex.color = g1$role_vector, vertex.frame.color=NA)
 mtext("B", side = 3, line = -1.5, adj = 0, cex = 1, font = 2)
+mtext(paste0("α = -1.81   Mean degree = ", round(mean(igraph::degree(g1$G)), 1)),
+      side = 1, line = 0.5, cex = 0.8)
+mtext(bquote(zeta[measured] == .(round(igraph::assortativity_degree(g1$G), 3)) ~~ 
+               rho[measured] == .(round(compute_versatile_assortativity(g1$G, g1$role_vector)$prop_edge_based, 3))),
+      side = 1, line = 2.5, cex = 0.8)
 
-g2 <- assortative_graph_generator2(num_nodes=100, riv=c(1/3, 1/3, 1/3), assortativity_kernel=0, spatial_kernel=0, main_partners_prop=c(zero = 1, one = 0, two = 0, three = 0, four = 0), ass_v_param=0.15, dd_param=-1.81, dd_upper=15, matrix_tag=1, seed_add=1, role=T, monogamy=0, cm=3)
-igraph::plot.igraph(g2$G, layout = layout_with_fr, vertex.size = 6, vertex.label = NA,  vertex.color = g$role_vector, vertex.frame.color=NA)
+seed_add <- 78
+g2 <- NULL
+
+while (is.null(g2)) {
+  g2 <- tryCatch(
+    assortative_graph_generator5(type="hetero", num_nodes=100, riv=c(1/3, 1/3, 1/3), assortativity_kernel=0, spatial_kernel=0, main_partners_prop=c(zero = 1, one = 0, two = 0, three = 0, four = 0), 
+                                 ass_v_param=5/6, dd_param=-1.81, dd_upper=15, matrix_tag=1, seed_add=seed_add, role=T, monogamy=0, cm=3, tag=1),
+    error = function(e) {
+      message("Seed ", seed_add, " failed: ", e$message)
+      seed_add <<- seed_add + 1
+      NULL
+    }
+  )
+}
+igraph::plot.igraph(g2$G, layout = layout_with_fr, vertex.size = 6, vertex.label = NA, vertex.color = g2$role_vector, vertex.frame.color=NA)
 mtext("C", side = 3, line = -1.5, adj = 0, cex = 1, font = 2)
+mtext(paste0("α = -1.81   Mean degree = ", round(mean(igraph::degree(g2$G)), 1)),
+      side = 1, line = 0.5, cex = 0.8)
+mtext(bquote(zeta[measured] == .(round(igraph::assortativity_degree(g2$G), 3)) ~~ 
+               rho[measured] == .(round(compute_versatile_assortativity(g2$G, g2$role_vector)$prop_edge_based, 3))),
+      side = 1, line = 2.5, cex = 0.8)
 
 dev.off()
 
-#ggsave(filename = "figures/assortative_networks.png", plot = panel, width = 12, height = 4, dpi = 300)
+ggsave(filename = "figures/assortative_networks2.png", plot = panel, width = 12, height = 4, dpi = 300)
 
 result <- outbreak_simulator_fast4(timesteps=350, infectious_time=25, initial_exposed=1, transmission_prob=0.5, isolation_time_mean=25, isolation_time_sd=0, directionality=1, incubation_period=5, matrix_tag=1, tag="", monogamy=0, rec_daily=0.1, g=A) # Fill with your actual arguments
 
 graph_gen_outbreak_sim2 <- function(type="hetero", num_nodes=1000, riv=c(1/3, 1/3, 1/3), infectious_time=25, assortativity_kernel=0, main_partners_prop=c(zero=0.3, one=0.45, two=0.123, three=0.098, four=0.027), ass_v_param=2/3, dd_param=-1.81, dd_upper=100, matrix_tag=1, spatial_kernel=0, 
-                                    timesteps=300, transmission_prob=0.5, isolation_time_mean=30, isolation_time_sd=0, directionality=1, incubation_period=5, rec_daily=0.1, dir="", initial_exposed=5, ot_max=365){
+                                    timesteps=300, transmission_prob=0.5, isolation_time_mean=30, isolation_time_sd=0, directionality=1, incubation_period=5, rec_daily=0.1, dir="", initial_exposed=5, ot_max=365, tag=NA){
   
-  g <- assortative_graph_generator3(type=type, num_nodes, riv, assortativity_kernel, spatial_kernel, main_partners_prop, ass_v_param, dd_param, dd_upper, matrix_tag=1, seed_add=1, role=T, monogamy=0, cm=3, ot_max=ot_max)
+  g <- assortative_graph_generator4(type=type, num_nodes, riv, assortativity_kernel, spatial_kernel, main_partners_prop, ass_v_param, dd_param, dd_upper, matrix_tag=1, tag=tag, seed_add=1, role=T, monogamy=0, cm=3, ot_max=ot_max)
   
   outbreak <- outbreak_simulator_fast4(timesteps=timesteps, infectious_time=infectious_time, initial_exposed=initial_exposed, transmission_prob, isolation_time_mean, isolation_time_sd, directionality, 
                                        incubation_period, matrix_tag=1, tag=1, monogamy=0, rec_daily, g=g)
   
   output <- list(g=g, outbreak=outbreak)
   
-  saveRDS(output, file=paste0("simulation/",dir,"epidemic_", num_nodes, "_ass=", assortativity_kernel, "_infectious_time=", infectious_time, "_ass_v=", round(ass_v_param,2), 
+  saveRDS(output, file=paste0("simulation2/",dir,"epidemic_", num_nodes, "_ass=", assortativity_kernel, "_infectious_time=", infectious_time, "_ass_v=", round(ass_v_param,2), 
                               "_dd_param=", dd_param, "_dd_upper=", dd_upper, "_spatial=", spatial_kernel, "_timesteps=", timesteps, "_transmission_prob=", round(transmission_prob,2), "_isol=", isolation_time_mean, "_isol_sd=", isolation_time_sd, 
                               "_directionality=", round(directionality,2), "_incu=", incubation_period, "_rec=", round(rec_daily,2), ".rds"))
   
@@ -716,8 +1091,48 @@ dev.off()
 
 ob1 <- graph_gen_outbreak_sim2(num_nodes=10000, riv=c(1/3, 1/3, 1/3), infectious_time=25, assortativity_kernel=0, main_partners_prop=c(zero=0, one=0, two=0, three=0, four=1), ass_v_param=2/3, dd_param=-1.81, dd_upper=100, matrix_tag=1, spatial_kernel=0, timesteps=500, transmission_prob=1, isolation_time_mean=30, isolation_time_sd=0, directionality=1, incubation_period=5, rec_daily=0.1)
 
+assortative_graph_generator3(
+  type="hetero", 
+  num_nodes = 5000,
+  riv = c(lhs$riv1[i], lhs$riv2[i], lhs$riv3[i]),
+  assortativity_kernel = round(lhs$assortativity_kernel[i],2),
+  spatial_kernel = round(lhs$spatial_kernel[i],2),
+  main_partners_prop = c(zero = lhs$p0[i], one = lhs$p1[i], two = lhs$p2[i], three = lhs$p3[i], four = lhs$p4[i]),
+  ass_v_param = 1,
+  dd_param = round(lhs$dd_param[i],2),
+  dd_upper = lhs$dd_upper[i],
+  matrix_tag = 1,
+  seed_add=1, 
+  role=T, 
+  monogamy=0, 
+  cm=3, 
+  ot_max=365)
+
+for(i in 1:nrow(lhs)){ 
+  p <- proc.time()
+  assortative_graph_generator3(
+    type="hetero", 
+    num_nodes = lhs$num_nodes[i],
+    riv = c(lhs$riv1[i], lhs$riv2[i], lhs$riv3[i]),
+    assortativity_kernel = round(lhs$assortativity_kernel[i],2),
+    spatial_kernel = round(lhs$spatial_kernel[i],2),
+    main_partners_prop = c(zero = lhs$p0[i], one = lhs$p1[i], two = lhs$p2[i], three = lhs$p3[i], four = lhs$p4[i]),
+    ass_v_param = lhs$ass_v_param[i],
+    dd_param = round(lhs$dd_param[i],2),
+    dd_upper = lhs$dd_upper[i],
+    matrix_tag = 1,
+    seed_add=1, 
+    role=T, 
+    monogamy=0, 
+    cm=3, 
+    ot_max=365)
+  print(paste0(round((proc.time()-p)["elapsed"],1), " seconds"))
+}
+
+
+
 p <- proc.time()
-for(i in 45:nrow(lhs)){ 
+for(i in 1:nrow(lhs)){ 
   graph_gen_outbreak_sim2(
     type="hetero", 
     num_nodes = lhs$num_nodes[i],
@@ -734,10 +1149,11 @@ for(i in 45:nrow(lhs)){
     transmission_prob = lhs$transmission_prob[i],
     isolation_time_mean = lhs$isolation_time_mean[i],
     isolation_time_sd = lhs$isolation_time_sd[i],
-    directionality = lhs$directionality[i],
+    directionality = round(lhs$directionality[i],2),
     incubation_period = lhs$incubation_period[i],
     rec_daily = lhs$rec_daily[i],
-    dir="sim_2/"
+    dir="",
+    tag=i
   )
   print(paste0(round((proc.time()-p)["elapsed"]/i,1), " seconds"))
 }
