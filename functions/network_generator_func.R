@@ -426,11 +426,8 @@ R_random5 <- stan_model("functions/R_random5.stan")
 R_biased5 <- stan_model("functions/R_biased5.stan")
 sigmoidP9 <- stan_model("functions/sigmoidP9.stan")
 expI4 <- stan_model("functions/expI4.stan")
-expI4.2 <- stan_model("functions/expI4.2.stan")
 
-model_list <- list(lrwP=lrwP, expI4=expI4, sigmoidP9=sigmoidP9, R_random5=R_random5, R_biased5=R_biased5) #sigmoidP=sigmoidP, sigmoidPS=sigmoidPS, 
-
-model_list <- list(expI4.2=expI4.2) #sigmoidP=sigmoidP, sigmoidPS=sigmoidPS, 
+model_list <- list(lrwP=lrwP, expI4=expI4, sigmoidP9=sigmoidP9, R_random5=R_random5, R_biased5=R_biased5)
 
 #####
 

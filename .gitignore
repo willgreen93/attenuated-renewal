@@ -12,3 +12,5 @@ data/
 old/
 review/
 .claude/
+.Rhistory
+*.swp

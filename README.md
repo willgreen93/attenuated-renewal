@@ -45,6 +45,30 @@ The repository includes implementations of the following forecasting approaches:
 
 ---
 
-## Repository structure
+## Setup
 
-*(Exact file names may change as the repository is cleaned; this reflects the conceptual structure.)*
+Before running the scripts, create the required output directories:
+
+```r
+dirs <- c("mixing_matrices", "simulation/sim_2", "simulation/sim_homo",
+          "simulation/sim_het", "fits/sim/fit_sim3", "fits/sim/fit_homo",
+          "fits/sim/fit_het", "fits/cities", "fits/outputs", "figures")
+lapply(dirs, dir.create, recursive = TRUE, showWarnings = FALSE)
+```
+
+All scripts should be run from the project root directory.
+
+---
+
+## Data
+
+The repository includes mpox incidence data from Barcelona and Madrid (`data/mpox_BCN_MAD.xlsx`), as well as case data from NYC and San Francisco.
+
+---
+
+## Session info
+
+This code was developed using:
+
+- R version 4.3.x
+- Key packages: `cmdstanr`, `rstan`, `dplyr`, `ggplot2`, `igraph`, `EpiEstim`, `scoringutils`

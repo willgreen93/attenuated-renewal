@@ -7,8 +7,6 @@ library(tidyr)
 library(glmnet)
 library(purrr)
 
-setwd("~/attenuated-renewal")
-
 metric_levels <- c("crps", "overprediction", "dispersion", "underprediction")
 model_levels <- c("lrwP", "R_random5", "R_biased5", "expI2", "expI3", "sigmoidP3", "sigmoidP4", "sigmoidP6")
 place_levels <- c("BCN", "LON", "MAD", "NYC", "SF", "HOMO", "HET", "SIM")
