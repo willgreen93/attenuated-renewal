@@ -150,7 +150,7 @@ for(i in 1:length(mat_list)){
   
   df_raw <- data.frame(#i=i, 
                        #num_nodes=sim$num_nodes,
-                       alpha_param = sim$graph_params$alpha, 
+                       alpha_param = -sim$graph_params$alpha, 
                        alpha_measured=fit_trunc_powerlaw_alpha(deg=degree(graph1), kmax=max(degree(graph1)), alpha_init=2)$alpha_hat,
                        #assortativity_ot=assortativity_degree(sim$g_ot1),
                        #assortativity_main=assortativity_degree(sim$g_main),
@@ -164,7 +164,7 @@ for(i in 1:length(mat_list)){
                        vers_assortativity_measured=compute_versatile_assortativity(g=graph1, role_vector=sim$graph_param$roles)$prop_edge_based,
                        #vers_assortativity2=compute_versatile_assortativity(sim$G, sim$role_vector)$ratio_vs_random,
                        spatial_param=sim$graph_params$spatial_ass,
-                       mean_edge_distance=compute_edge_distance_stats(graph1, sim$graph_params$coords[,1], sim$graph_params$coords[,2])[[1]],
+                       mean_edge_distance=-compute_edge_distance_stats(graph1, sim$graph_params$coords[,1], sim$graph_params$coords[,2])[[1]],
                        sd_edge_distance=compute_edge_distance_stats(graph1, sim$graph_param$coords[,1], sim$graph_params$coords[,2])[[2]],
                        biggest_cluster=max(components(sim$G)$csize)/sim$graph_params$n,
                        second_biggest_cluster=sort(components(sim$G)$csize, decreasing=T)[2]/sim$graph_params$n)
@@ -205,11 +205,11 @@ my_lower <- function(data, mapping) {
 my_upper <- function(data, mapping) {
   x     <- GGally::eval_data_col(data, mapping$x)
   y     <- GGally::eval_data_col(data, mapping$y)
-  ct    <- cor.test(x, y)
+  ct    <- cor.test(x, y, method="spearman")
   corr  <- ct$estimate
   stars <- symnum(ct$p.value, cutpoints = c(0, 0.001, 0.01, 0.05, 1),
                   symbols = c("***", "**", "*", ""))
-  col   <- col_numeric(c("steelblue", "white", "firebrick"), domain = c(-1, 1))(corr)
+  col   <- col_numeric(c("firebrick", "white", "steelblue"), domain = c(-1, 1))(corr)
   
   ggplot() +
     annotate("text", x = 0.5, y = 0.5,
@@ -219,6 +219,14 @@ my_upper <- function(data, mapping) {
              fontface = "bold") +
     xlim(0, 1) + ylim(0, 1) +
     theme_void()
+}
+
+my_diag <- function(data, mapping) {
+  ggplot(data, mapping) +
+    geom_density(fill = "lightsteelblue", colour = "#8BAFC9", linewidth = 0.4) +
+    scale_x_continuous(n.breaks = 3) +
+    theme_bw() +
+    theme(panel.grid = element_blank())
 }
 
 p_network <- GGally::ggpairs(df_plot,
@@ -238,7 +246,8 @@ p_network <- GGally::ggpairs(df_plot,
 
 p_network
 
-ggsave("figures/network_properties.png", p_network, width=10, height=10)
+ggsave("figures/network_properties2.png", p_network, width=10, height=10)
+ggsave("figures/network_properties2.tif", p_network, device = "tiff", dpi = 300, width = 7.5, height = 7.5, units = "in", compression = "lzw")
 
 ggplot(df, aes(x=biggest_cluster)) +
   geom_histogram() + 

@@ -16,14 +16,14 @@ place_levels <- c("BCN", "LON", "MAD", "NYC", "SF", "HOMO", "HET", "SIM")
 id_cols <- c("model_name", "network", "epi_phase", "tag", "f_week")
 full_names <- c(lrwP="LRW", R_random5="RRAND", R_biased5="RBIAS", expI2="IGNORE", expI3="IGNORE", expI4="EXPI", expI4.2="EXPI2", expI9="IGNORE", sigmoidP3="IGNORE", sigmoidP4="IGNORE", sigmoidP5="IGNORE", sigmoidP6="IGNORE", sigmoidP7="IGNORE", sigmoidP8="IGNORE", sigmoidP9="SIGT")
 
-output1 <- readRDS("outputs_final.rds")
-output2 <- readRDS("fit_cit2.rds")
+#output1 <- readRDS("outputs_final.rds")
+#output2 <- readRDS("fit_cit2.rds")
 
 #output <- list()
 #for(i in 1:4) output[[i]] <- bind_rows(output1[[i]] %>% filter(network %in% c("hetero", "homo", "MSM_like"), model %in% c("lrwP", "R_random5", "R_biased5", "sigmoidP9", "expI4")), output2[[i]])
 #names(output) <- names(output1)
 #saveRDS(output, file="outputs_260611.rds")
-output <- readRDS("outputs_260611.rds")
+output <- readRDS("outputs/outputs_260709.rds")
 
 divergences <- output$Rhat_df %>% filter(divergences >0 | max_Rhat > 1.05 | is.nan(max_Rhat))
 
@@ -42,12 +42,12 @@ fc_log <- transform_forecasts(fc, offset = 1, append = FALSE, label = "log")
 metrics     <- get_metrics(fc,     select = c("crps", "overprediction", "underprediction", "dispersion"))
 metrics_log <- get_metrics(fc_log, select = c("crps", "overprediction", "underprediction", "dispersion"))
 
+library(stringr)
+
 scoring_lin0 <- as.data.frame(score(fc,     metrics = metrics)) %>% mutate(measure="Linear CRPS", network=str_remove(network, "3"))
 scoring_log0 <- as.data.frame(score(fc_log, metrics = metrics)) %>% mutate(measure="Log CRPS",    network=str_remove(network, "3"))
 
-scoring_results_LON <- readRDS("scoring_results_censored.rds")
-
-library(stringr)
+scoring_results_LON <- readRDS("outputs/scoring_results_censored.rds")
 
 scoring_results_raw0 <- bind_rows(rbind(scoring_lin0, scoring_log0)) %>% 
   pivot_longer(cols = c(crps, overprediction, underprediction, dispersion), names_to = "metric", values_to = "value") %>%
@@ -61,7 +61,7 @@ scoring_results_raw <- scoring_results_raw0 %>% filter(f_week==3) %>%
 
 
 ### TABLE 1
-scoring_results_raw0 %>% filter(f_week==3, metric=="crps") %>% 
+sr2 <- scoring_results_raw0 %>% filter(f_week==3, metric=="crps") %>% 
   group_by(model_name, metric, network, measure) %>%
   summarise(mean_value=mean(value)) %>%
   tidyr::spread(network, mean_value) %>%
@@ -72,8 +72,10 @@ SA1 <- scoring_results_raw0 %>% filter(metric=="crps") %>%
   group_by(model_name, metric, f_week, network, measure) %>%
   summarise(mean_value=mean(value)) %>%
   tidyr::spread(network, mean_value) %>%
-  arrange(f_week, measure, MSM_like) %>%
+  arrange(f_week, measure, model_name) %>%
   select(model_name, metric, measure, BCN, LON, MAD, NYC, SF, hetero, homo, MSM_like)
+
+SA1 %>% filter(f_week==2)
 
 saveRDS(SA1, "figures/output_SA1.rds")
 
@@ -91,7 +93,98 @@ ts_comb2 <- ggplot(scoring_results_raw %>% filter(metric!="crps", network=="MSM_
   labs(x="", title="CRPS measured on the linear forecasting scale", y="CRPS (cases)")
 
 ggsave("figures/ts_comb2.png", ts_comb2, width=12, height=7.5)
+ggsave("figures/ts_comb2.tif", ts_comb2,
+       device = "tiff", dpi = 300,
+       width = 7.5, height = 4.69,   # scaled from 12×7.5 maintaining aspect ratio
+       units = "in",
+       compression = "lzw")
 
+## FIGURE 3
+for(i in 1:9){
+  print(i)
+  fit <- readRDS(paste0("fits/sim/MSM_like_disp/fit_sigmoidP9_k=1_epi_phase=10_",i,"D.rds"))
+  AA <- rstan::extract(fit$fit)
+  
+  mean_R_df <- fit$simulation$outbreak$generation_interval_matrix %>%
+    left_join(fit$simulation$outbreak$generation_interval_matrix %>% 
+                group_by(infector) %>% 
+                  summarise(onward_infections=n()), by = c("index" = "infector")) %>%
+    select(infectious_time, index, onward_infections) %>%
+    mutate(onward_infections = ifelse(is.na(onward_infections), 0, onward_infections)) %>%
+    group_by(infectious_time) %>%
+    summarise(mean_R=mean(onward_infections)) %>%
+    mutate(rollmean_R = zoo::rollmean(mean_R, 7, fill=NA)) #%>%
+  
+  draws <- as_draws_df(fit$fit)
+
+  N <- fit$input_list$N  # your observed window length — adjust
+  S0 <- fit$simulation$graph$graph_params$n# draws$`S0[1]`  # or whatever you passed in as data
+    
+  simul_inc <- as.vector(fit$incidence_full)
+  fit_inc <- fit$simulation$outbreak$incidence_vector
+
+  offset <- (which(fit_inc==max(fit_inc))-which(simul_inc==max(simul_inc)))[1]
+
+  gen_weights_norm <- fit$input_list$gen_weights
+
+  # forward-looking weighted mean helper
+  fwd_Rc <- function(re_vec, w) {
+  n <- length(re_vec)
+  sapply(seq_len(n), function(i) {
+    j <- min(i + length(w) - 1, n)
+    len <- j - i + 1
+    sum(w[1:len] * re_vec[i:j]) / sum(w[1:len])
+  })
+}
+
+  Re_draws <- draws |>
+    select(.draw, `R0[1]`, `delta[1]`, t_change, `R_floor[1]`,
+           matches("^cumulative_infections\\[\\d+,1\\]")) |>
+    pivot_longer(matches("^cumulative_infections"),
+                 names_to = "t", values_to = "cum_inf",
+                 names_transform = list(t = \(x) as.integer(gsub(".*\\[(\\d+),.*", "\\1", x)))) |>
+    group_by(.draw) |>
+    arrange(.draw, t) |>
+    mutate(
+      susc_frac = pmax(0, 1 - lag(cum_inf, default = 0) / S0),
+      sigmoid_R = `R_floor[1]` + (`R0[1]` - `R_floor[1]`) * plogis(-`delta[1]` * (t - t_change)),
+      Re        = sigmoid_R * susc_frac,
+      Rc        = fwd_Rc(Re, gen_weights_norm)   # <-- replaces Re
+    ) |>
+    ungroup() |>
+    group_by(t) |>
+    summarise(lower  = quantile(Rc, 0.025, na.rm=T),
+              median = quantile(Rc, 0.5, na.rm=T),
+              upper  = quantile(Rc, 0.975, na.rm=T))
+  
+  joined <- left_join(
+    Re_draws |> mutate(infectious_time = t + offset),
+    mean_R_df,
+    by = "infectious_time"
+  ) %>%
+    mutate(simul=i)
+  
+  if(i==1) joined_plot <- joined
+  else joined_plot <- rbind(joined, joined_plot)
+  
+}
+
+p <- ggplot(joined_plot %>% filter(!is.na(rollmean_R) & !is.na(median)), aes(x = t)) + 
+  geom_point(aes(y = rollmean_R)) +
+  geom_line(aes(y = median)) + 
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) + 
+  theme_minimal() +
+  labs(x="Time (days)", y=("Case Reproduction Number")) +
+  theme(panel.grid=element_blank()) +
+  facet_wrap(~simul, scales="free")
+
+print(p)
+ggsave("figures/R_case_comp2.png", p, width=8, height=8)
+ggsave("figures/R_case_comp2.tif", p,
+       device = "tiff", dpi = 300,
+       width = 7.5, height = 7.5,
+       units = "in",
+       compression = "lzw")
 
 ### FIGURE 4
 cit_epi_phase2 <- ggplot(scoring_results_raw %>% filter(metric!="crps", network %in% c("BCN", "MAD", "NYC", "SF"), measure=="Linear CRPS"), aes(x=epi_phase, y=value, fill=metric)) +
@@ -107,6 +200,11 @@ cit_epi_phase2 <- ggplot(scoring_results_raw %>% filter(metric!="crps", network 
   labs(x="", title="CRPS measured on the linear forecasting scale", y= "CRPS (cases)")
 
 ggsave("figures/crps_epi_phase_cit2.png", cit_epi_phase2, width=10, height=10)
+ggsave("figures/crps_epi_phase_cit2.tif", cit_epi_phase2,
+       device = "tiff", dpi = 300,
+       width = 7.5, height = 7.5,
+       units = "in",
+       compression = "lzw")
 
 ### FIGURE 5
 plotter <- output$plotter %>% filter(network %in% c("BCN3", "MAD3", "NYC3", "SF3"), epi_phase %in% c(2,6,10)) %>% 
@@ -135,6 +233,11 @@ place_comp2 <- ggplot(plotter %>% filter(true_infections>=1, median>=1 | day > c
   labs(x="Day", y="Incidence")
 
 ggsave("figures/place_comp2.png", place_comp2, width=15, height=9)
+ggsave("figures/place_comp2.tif", place_comp2,
+       device = "tiff", dpi = 300,
+       width = 7.5, height = 4.5,
+       units = "in",
+       compression = "lzw")
 
 ### FIGURE 6
 fig6_plot <- scoring_results_raw0 %>% 
@@ -175,7 +278,11 @@ f61 <- ggplot(fig6_plot, aes(color = score_type)) +
   scale_y_discrete(limits=rev)
 
 ggsave("figures/median_scores.png", f61, height=6, width=10)
-
+ggsave("figures/median_scores.tif", f61,
+       device = "tiff", dpi = 300,
+       width = 7.5, height = 4.5,
+       units = "in",
+       compression = "lzw")
 
 ## NEW FIGURE
 for(i in 1:10){
@@ -198,6 +305,13 @@ for(i in 1:10){
 }
 
 ####
+image_read_pdf("figures/Approach_schematic.pdf", density = 300) |>
+  image_convert(format = "tiff") |>
+  image_write("figures/Approach_schematic.tif", 
+              format = "tiff", 
+              compression = "lzw")
+
+
 incidence_schematic <- data.frame(day=seq(0,25),
                                   inc=c(1,0,1,0,2,1,1,4,5,4,5,4,3,2, 4, 5, 6, 5, 2, 3, 3, 1, 1,0, 0, 1))
 
@@ -340,34 +454,37 @@ scoring_results_agg %>% filter(metric=="crps") %>% mutate(value=round(value, ife
 R_case <- function(simul_vec){
   for(k in simul_vec){
     print(k)
-    b <- readRDS(paste0("fits/sim/fit_sim3/fit_sigmoidP_k=1_strat=annual_likelihood=1_epi_phase=7_",k,".rds"))
+    b <- readRDS(paste0("fits/sim/MSM_like_disp/fit_sigmoidP9_k=1_epi_phase=10_",k,"D.rds"))
     c <- rstan::extract(b$fit)
+    d <- readRDS(paste0("simulation2/MSM_like/epidemic_",k,".rds")
     
     gT_dist <- b$input_list$gen_weights[b$input_list$gen_weights!=0]
     tmax <- length(gT_dist)
     
-    mean_R_df <- b$simulation$generation_interval_matrix %>%
-      group_by(person, t_I_start) %>%
-      left_join(b$simulation$generation_interval_matrix %>% group_by(infector) %>% summarise(onward_infections=n()), by = c("person" = "infector")) %>%
-      select(t_I_start, person, onward_infections) %>%
+    mean_R_df <- b$simulation$outbreak$generation_interval_matrix %>%
+      group_by(index, infectious_time) %>%
+      left_join(b$simulation$outbreak$generation_interval_matrix %>% group_by(infector) %>% summarise(onward_infections=n()), by = c("index" = "infector")) %>%
+      select(infectious_time, index, onward_infections) %>%
       mutate(onward_infections = ifelse(is.na(onward_infections), 0, onward_infections)) %>%
-      group_by(t_I_start) %>%
+      group_by(infectious_time) %>%
       summarise(mean_R=mean(onward_infections)) %>%
-      mutate(rollmean_R = zoo::rollmean(mean_R, 7, fill=NA)) %>%
-      filter(t_I_start < b$input_list$N+b$input_list$h-tmax)
+      mutate(rollmean_R = zoo::rollmean(mean_R, 7, fill=NA)) #%>%
+      #filter(infectious_time < b$input_list$N+b$input_list$h-tmax)
     
-    ggplot(mean_R_df, aes(x=t_I_start, y=rollmean_R)) +
+    ggplot(mean_R_df, aes(x=infectious_time, y=rollmean_R)) +
       geom_point() +
       theme_minimal()
     
-    j_vec <- c(0,seq_len(b$input_list$N+b$input_list$h))  # for example
+    days <- max(mean_R_df$infectious_time)
     
-    R_mat <- sapply(j_vec, function(jk) c$R_floor + (c$R0 - c$R_floor) * plogis(-c$delta * (jk-as.vector(c$t_change))))
+    j_vec <- c(0,seq_len(days))  # for example
+    
+    R_mat <- sapply(j_vec, function(jk) c$R_floor + (c$R0 - c$R_floor) * plogis(-c$delta * (jk-as.vector(c$t_change))))[,159:360]
     #R_vec <- R_mat[1,]
     
-    imm_mat <- (1-cbind(0,c$cumulative_infections[,,1]/b$param_list$num_nodes))
+    imm_mat <- (1-cbind(0,c$cumulative_infections[,,1]/b$simulation$graph$graph_params$n))
+    imm_mat <- cbind(matrix(1, nrow = nrow(imm_mat), ncol = ncol(R_mat) - ncol(imm_mat)), imm_mat)
     #imm_vec <- imm_mat[1,]
-    
     
     #R_case <- vector(length=length(R_vec))
     #for(i in 1:length(R_case)) R_case[i] <- sum(R_vec[i:(i+tmax-1)]*gT_dist*imm_vec[i:(i+tmax-1)])
@@ -379,14 +496,14 @@ R_case <- function(simul_vec){
       for(j in 1:ncol(R_case_mat)) R_case_mat[i,j] <- sum(R_vec[j:(j+tmax-1)]*gT_dist*imm_vec[j:(j+tmax-1)])
     }
     
-    col_ci <- apply(R_case_mat, 2, quantile, probs = c(0.025, 0.5, 0.975))[,mean_R_df$t_I_start+1]
+    col_ci <- apply(R_case_mat, 2, quantile, probs = c(0.025, 0.5, 0.975))#[,mean_R_df$infectious_time+1]
     
     if(k==simul_vec[1]) R_plotting <- mean_R_df %>% mutate(R_lower=col_ci[1,], R_median=col_ci[2,], R_upper=col_ci[3,]) %>% mutate(simulation=k)
     else R_plotting <- rbind(R_plotting, mean_R_df %>% mutate(R_lower=col_ci[1,], R_median=col_ci[2,], R_upper=col_ci[3,]) %>% mutate(simulation=k))
     
   }
   
-  p <- ggplot(R_plotting, aes(x=t_I_start)) +
+  p <- ggplot(R_plotting, aes(x=infectious_time)) +
     geom_line(aes(y=R_median)) +
     geom_ribbon(aes(ymin=R_lower, ymax=R_upper), alpha=0.2) +
     geom_point(aes(y=rollmean_R)) +

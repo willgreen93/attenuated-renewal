@@ -409,7 +409,7 @@ fit_func2 <- function(simulation, model_name, cutoff, epi_phase=NA, dir="", iter
   }
   
   output2$time_taken <- time_taken
-  output2$file_name <- paste0("fits/", folder,"/fit_", model_name,"_k=", k, "_epi_phase=", epi_phase,"_", tag, ".rds")
+  output2$file_name <- paste0("fits/", folder, "/", dir, "/fit_", model_name,"_k=", k, "_epi_phase=", epi_phase,"_", tag, ".rds")
   
   plotting_func(output2)
   
@@ -430,7 +430,7 @@ expI4.2 <- stan_model("functions/expI4.2.stan")
 
 model_list <- list(lrwP=lrwP, expI4=expI4, sigmoidP9=sigmoidP9, R_random5=R_random5, R_biased5=R_biased5) #sigmoidP=sigmoidP, sigmoidPS=sigmoidPS, 
 
-model_list <- list(expI4.2=expI4.2) #sigmoidP=sigmoidP, sigmoidPS=sigmoidPS, 
+model_list <- list(sigmoidP9=sigmoidP9) #sigmoidP=sigmoidP, sigmoidPS=sigmoidPS, 
 
 #####
 
@@ -476,7 +476,7 @@ plotting_func <- function(fit_output){
   
 }
 
-sim_files <- c(list.files("simulation2/homo/", full.names=T))
+sim_files <- c(list.files("simulation2/MSM_like/", full.names=T))
 nums <- as.numeric(sub(".*epidemic_(\\d+)\\.rds$", "\\1", sim_files))
 fit_files <- sim_files[order(nums)]
 
@@ -488,7 +488,7 @@ for(j in fit_files[1:10]){
   plot(simulation$outbreak$incidence_vector)
 }
 
-for(j in fit_files){
+for(j in fit_files[-c(1,10,100)]){
   print(j)
   simulation <- readRDS(j)
   
@@ -507,14 +507,14 @@ for(j in fit_files){
   
   tag <- simulation$graph$tag
   print(tag)
-  dir <- sub("^[^/]+/([^/]+)/.*", "\\1", j)
+  dir <- "MSM_like_disp" #sub("^[^/]+/([^/]+)/.*", "\\1", j)
   
   plot(simulation$outbreak$incidence_vector[1:(times[10]+28)])
   
-  for(i in times[3]){
-    for(q in "lrwP"){#names(model_list)){
+  for(i in times[10]){
+    for(q in "sigmoidP9"){#names(model_list)){
       print(i)
-      a7 <- fit_func2(simulation, model_name=q, cutoff=i, epi_phase=which(times==i), dir=dir, iter=1000, chains=4, tag=paste0(tag,"T"), keep_fit=F, seed=31)
+      a7 <- fit_func2(simulation, model_name=q, cutoff=i, epi_phase=which(times==i), dir=dir, iter=2000, chains=4, tag=paste0(tag,"D"), keep_fit=T, seed=31)
     }
   }
 }
@@ -573,6 +573,7 @@ adj_plot <- ggplot(adj_plot_df, aes(x = date, y = value)) +
         axis.text.x      = element_text(angle = 45, hjust = 1, size = 8))
 
 ggsave("figures/NYC_SF_adjustment.png", adj_plot, width=6, height=6)
+ggsave("figures/NYC_SF_adjustment.tif", adj_plot, device = "tiff", dpi = 300, width = 6, height = 6, units = "in", compression = "lzw")
 
 NYC_data <- df %>% dplyr::select(date, confirm_adj) %>% rename(NYC=confirm_adj)
 #SF_data <- read.csv("data/SF_cases.csv") %>% mutate(date=as.Date(episode_date, format="%d/%m/%Y"), SF=new_cases) %>% select(date, SF)  %>% mutate(day_type = ifelse(weekdays(date) %in% c("Saturday", "Sunday"), "weekend", "weekday"))

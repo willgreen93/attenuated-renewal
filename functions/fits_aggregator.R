@@ -1,14 +1,14 @@
 library(stringr)
 
-files <- c(list.files("fits/sim/MSM_like/", full.names=T), list.files("fits/sim/homo/", full.names=T), list.files("fits/sim/hetero/", full.names=T), list.files("fits/cities/", full.names=T))
+files_raw <- c(list.files("fits/sim/MSM_like/", full.names=T), list.files("fits/sim/homo/", full.names=T), list.files("fits/sim/hetero/", full.names=T), list.files("fits/cities/", full.names=T))
+files <- files_raw[grepl("sigmoidP9", files_raw) | grepl("expI4", files_raw) | grepl("lrwP", files_raw) | grepl("R_random5", files_raw) | grepl("R_biased5", files_raw)]
 
-files2 <- files[order(network, model, epi_phase, tags)]
-
-files2 <- files[grepl("sigmoidP9", files) | grepl("expI4", files) | grepl("lrwP", files) | grepl("R_random5", files) | grepl("R_biased5", files)]
 model     <- sub(".*fit_(.*)_k=.*", "\\1", files2)
 epi_phase <- as.numeric(sub(".*epi_phase=(\\d+)_.*", "\\1", files2))
 tags       <- idx <- str_extract(files2, "(?<=_)[0-9]+(?=T?\\.rds$)") |> as.numeric()
 network <- sub(".*sim/([^/]+)/fit.*", "\\1", files2)
+
+files2 <- files[order(network, model, epi_phase, tags)]
 
 table(model)
 table(epi_phase)
@@ -43,7 +43,8 @@ for(i in files2){
   main_params_raw <- as.data.frame(fit$summary) %>%
     mutate(model=fit$model_name, tag=tag, epi_phase=fit$input_list$epi_phase, cutoff=fit$cutoff, network=network)
     
-  CRPS_df_raw <- as.data.frame(t(fit$infections[idx,])) %>%
+  CRPS_df_raw <- rbind(as.data.frame(t(fit$infections[idx,1:(fit$input_list$N)])),
+                       as.data.frame(t(fit$forecast[idx,1:(fit$input_list$h)]))) %>%
     mutate(day=1:(fit$input_list$N+fit$input_list$h),
            true_infections=fit$incidence_full) %>% 
     filter(day > fit$cutoff) %>% 
@@ -69,7 +70,7 @@ for(i in files2){
 }
 
 df <- readRDS("new_outputs_hh.rds")
-saveRDS(object=list(Rhat_df=Rhat_df, CRPS_df=CRPS_df, plotter=plotter, main_params=main_params), file="fit_cit2.rds")
+saveRDS(object=list(Rhat_df=Rhat_df, CRPS_df=CRPS_df, plotter=plotter, main_params=main_params), file="outputs/outputs_260709.rds")
 
 
 ggplot(plotter %>% filter(network=="homo", epi_phase==10, model=="sigmoidP4"), aes(x=day)) +
