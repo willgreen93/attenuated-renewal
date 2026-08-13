@@ -2,7 +2,7 @@
 
 This repository contains the code supporting the paper:
 
-**Green WD, Overton C, Burdon M, Ward T, Funk S.**  
+**Green WD, Overton C, Burdon M, Ward T, McCarthy C, Funk S.**  
 *Robust Forecasting of Infectious Disease Epidemics in MSM Networks Using Attenuated Renewal Processes*
 
 ---
