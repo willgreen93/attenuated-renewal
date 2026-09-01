@@ -38,9 +38,7 @@ The repository includes implementations of the following forecasting approaches:
 - Log-random walk on incidence  
 - Renewal model with random walk in R(t)  
 - Biased random walk in R(t)
-- Exponential attenuation of R(t) in time  
 - Exponential attenuation of R(t) by attack rate  
-- Power-law attenuation of R(t) by attack rate  
 - Reverse-sigmoid attenuation of R(t) in time
 
 ---
