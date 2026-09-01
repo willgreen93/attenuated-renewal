@@ -21,7 +21,7 @@ This repository implements and evaluates a suite of short-term epidemic forecast
   - highly overdispersed degree distributions  
   - assortative mixing by degree and sexual role  
   - overlapping one-time and recurrent partnership networks
-- Implementation of six forecasting models, spanning:
+- Implementation of five forecasting models, spanning:
   - log-random walk baselines  
   - classical renewal models  
   - multiple forms of attenuation in the effective reproduction number \(R(t)\)
